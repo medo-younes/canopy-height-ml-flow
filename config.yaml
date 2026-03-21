@@ -1,0 +1,155 @@
+project:
+  name: test2
+  datasource: canelevation
+  aoi_name: "Wood Buffalo National Park of Canada"
+  epsg: "EPSG:2956"
+  test: false
+  seed: 420
+  run_models: ['ElasticNet', 'RandomForestRegressor', 'XGBoostRegressor']
+
+data:
+  root: data
+  res_m: 10
+  chm:
+    statistic: P95
+  sampling: 
+    id: "id"
+    n: 5000
+    k: 5
+    width: 10_000
+    height: 10_000
+    method: random
+    orientation: tb-lr
+    grid_type: rect
+    random_state: ${project.seed}
+    n_per_strata: 5
+    height_strata: [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
+    strata_names:  ["0-5", '5-10','10-15', '15-20','20-25','25-30' ,'30-35', '35-40', '40-45', '45-50', '>50']
+    min_area: 1000
+  filter:
+    min_height: 0
+    max_height: 50
+  canelevation:
+    get_aoi:
+      __target__: get_aoi
+      sites_path: ${input.sites_path}
+      name_col: DESC_EN
+      aoi_name: ${project.aoi_name}
+      
+
+input:  
+  dir: ${data.root}/${project.datasource}
+  laz_dir: ${input.dir}/laz
+  hag_dir: ${input.dir}/hag
+  chm_dir: ${input.dir}/chm
+  stratified_dir: ${input.dir}/stratified
+  tile_index_path: ${input.dir}/tile_index.parquet
+  sites_path: ${input.dir}/sites.geojson
+  water_path: ${input.dir}/water_bodies.parquet
+output:
+  dir: ${data.root}/runs
+  embeddings_dir: ${output.dir}/embeddings
+  aoi_path: ${output.dir}/aoi.geojson
+  tiles_aoi_path: ${output.dir}/tiles_aoi.parquet
+  tiles_aoi_bounds_path: ${output.dir}/tiles_aoi.geojson
+  sample_points_path: ${output.dir}/sample_points.parquet
+  
+  
+aws:
+  canelevation:
+    region: 'ca-central-1'
+    s3_bucket: s3://canelevation-lidar-point-clouds/
+    s3_directory: pointclouds_nuagespoints/NRCAN
+
+
+## Regression Models
+models:
+  ElasticNet:
+    __target__: sklearn.linear_model.ElasticNet
+    max_iter: 10000
+    random_state: ${project.seed}
+  RandomForestRegressor:
+    __target__: sklearn.ensemble.RandomForestRegressor
+    random_state: ${project.seed}
+  XGBoostRegressor:
+    __target__: xgboost.XGBRegressor
+    random_state: ${project.seed}
+    n_jobs: ${training.n_jobs}
+
+training:
+  scoring: "neg_root_mean_squared_error"
+  n_trials: 30
+  n_jobs: -1
+  verbose: 1
+  
+
+
+
+# parameters:
+  ElasticNet:
+    alpha:
+      __target__: optuna.distributions.FloatDistribution
+      low: 1e-5
+      high: 10.0
+      log: true
+    l1_ratio:
+      __target__: optuna.distributions.FloatDistribution
+      low: 0.0
+      high: 1.0
+      log: false
+  RandomForestRegressor:
+    n_estimators:
+      __target__: optuna.distributions.IntDistribution
+      low: 50
+      high: 500
+      log: true
+    max_depth:
+      __target__: optuna.distributions.IntDistribution
+      low: 5
+      high: 50
+      log: true
+    min_samples_split:
+      __target__: optuna.distributions.IntDistribution
+      low: 2
+      high: 20
+      log: false
+    min_samples_leaf:
+      __target__: optuna.distributions.IntDistribution
+      low: 1
+      high: 10
+      log: false
+    max_features:
+      __target__: optuna.distributions.CategoricalDistribution
+      choices: ["sqrt", "log2", 0.5]
+
+  XGBoostRegressor:
+    n_estimators:
+      __target__: optuna.distributions.IntDistribution
+      low: 10
+      high: 500
+      log: true
+    learning_rate:
+      __target__: optuna.distributions.FloatDistribution
+      low: 1e-4
+      high: 0.3
+      log: true
+    max_depth:
+      __target__: optuna.distributions.IntDistribution
+      low: 3
+      high: 50
+      log: true
+    subsample:
+      __target__: optuna.distributions.FloatDistribution
+      low: 0.5
+      high: 1.0
+      log: false
+    colsample_bytree:
+      __target__: optuna.distributions.FloatDistribution
+      low: 0.5
+      high: 1.0
+      log: false
+    gamma:
+      __target__: optuna.distributions.FloatDistribution
+      low: 0.0
+      high: 5.0
+      log: false

@@ -1,0 +1,10 @@
+*.json
+*.geojson
+data
+lidar_data
+py-canlidar
+*.png
+.metaflow
+*__pycache__
+*.env
+*.ipynb
