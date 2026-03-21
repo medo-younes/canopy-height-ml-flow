@@ -6,6 +6,7 @@ project:
   test: false
   seed: 420
   run_models: ['ElasticNet', 'RandomForestRegressor', 'XGBoostRegressor']
+  criterion: "RMSE"
 
 data:
   root: data
@@ -53,6 +54,8 @@ output:
   tiles_aoi_path: ${output.dir}/tiles_aoi.parquet
   tiles_aoi_bounds_path: ${output.dir}/tiles_aoi.geojson
   sample_points_path: ${output.dir}/sample_points.parquet
+  training_outputs_dir: training
+  models_dir: models
   
   
 aws:

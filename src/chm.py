@@ -14,13 +14,6 @@ def compute_chm(laz_path, out_raster_path, res_m = 10, statistic = "P95", comput
         pipeline['pipeline'].extend([filter_pdal("smrf", None),filter_pdal("hag_nn", kwargs = None)])
         height_dimension = "HeightAboveGround"
     
-
-    # pipeline['pipeline'].append({
-    #             "type":"filters.outlier",
-    #             "method":"radius",
-    #             "radius":1.0,
-    #             "min_k": 4
-    # })
     pipeline['pipeline'].append({
                 "type": "writers.gdal",
                 "filename": out_raster_path,

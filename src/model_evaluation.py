@@ -51,3 +51,25 @@ def get_cv_predictions(data_df, model_map, model_params, n_folds, X_cols, y_col)
     columns.extend(['y_true','folds'])
 
     return pd.DataFrame(np.array(outputs).T, columns= columns).astype({"folds": int})
+
+
+def get_best_model(results_df, metric='RMSE'):
+    """
+    Select the best model based on the mean of a specified metric across CV folds.
+    Lower is better for RMSE/MAE, higher is better for R2.
+    """
+    grouped = results_df.groupby('model')[metric]
+    mean_scores = grouped.mean().reset_index()
+    std_scores = grouped.std().reset_index()
+    if metric in ['RMSE', 'MAE']:
+        # Lower is better
+        
+        best_idx = mean_scores[metric].idxmin()
+    else:
+        # Higher is better (e.g., R2)
+        best_idx = mean_scores[metric].idxmax()
+    
+    best_model = mean_scores.loc[best_idx, 'model']
+    mean_score = mean_scores.loc[best_idx, metric]
+    std_score = std_scores.loc[best_idx, metric]
+    return best_model, mean_score, std_score

@@ -8,3 +8,5 @@ py-canlidar
 *__pycache__
 *.env
 *.ipynb
+models
+training

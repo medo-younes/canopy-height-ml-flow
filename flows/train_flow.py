@@ -38,8 +38,8 @@ class TrainFlow(FlowSpec):
         help = "Path to config YAML for configuring metaflow pipeline.",
         default = "config.yaml"
     )
-    run_id = Parameter(
-        "run-id",
+    dataset_id = Parameter(
+        "dataset-id",
         help = "Required run id for training dataset",
         default = "test",
         required = True
@@ -58,8 +58,10 @@ class TrainFlow(FlowSpec):
     def start(self):
       
         ## Setup output Directory
-        project_id = str(self.run_id)
-        self.out_dir = os.path.join(self.config.output.dir, project_id)
+        project_id = str(current.run_id)
+        dataset_id = str(self.dataset_id)
+        self.training_outputs_path = os.path.join(self.config.output.training_outputs_dir,project_id)
+        self.out_dir = os.path.join(self.config.output.dir, dataset_id)
         self.embeddings_dir = os.path.join(self.out_dir, "embeddings")
         self.ch_dir = os.path.join(self.out_dir, "canopy_heights")
         self.aoi_path = os.path.join(self.out_dir, "aoi.parquet")
@@ -69,9 +71,10 @@ class TrainFlow(FlowSpec):
         self.training_data_path = os.path.join(self.out_dir,'training.parquet')
         self.sample_points_path = os.path.join(self.out_dir,'sample_points.parquet')
         self.blocks_path = os.path.join(self.out_dir,'blocks.parquet')
-        self.training_outputs_path = os.path.join(self.out_dir,'training')
-
+        
+        ## Create Dirs
         os.makedirs(self.training_outputs_path, exist_ok=True)
+
         ## Setup 
         self.n_jobs = os.cpu_count() - 4
         self.X_cols = [f"A{str(i).zfill(2)}" for i in range(64)]
@@ -97,7 +100,7 @@ class TrainFlow(FlowSpec):
         )
 
         if self.test:
-            training_gdf = pd.concat([fold_data.sample(20) for idx, fold_data in training_gdf.groupby(['folds','strata'])]).reset_index()
+            training_gdf = pd.concat([fold_data.sample(10) for idx, fold_data in training_gdf.groupby(['folds','strata'])]).reset_index()
         # ## Prepare Training Data
         self.X  = training_gdf.loc[:, self.X_cols].values ## Independent Variables: Satelite Embeddings 
         self.y = training_gdf.loc[:,self.y_col].values ## Dependent Variable: Tree Canopy Height
@@ -128,7 +131,7 @@ class TrainFlow(FlowSpec):
         model_name = self.input
         model_outputs_path = os.path.join(self.training_outputs_path, f"{model_name}_results.parquet")
 
-     
+        ## Initialize Model Class
         model = init_model(model_name, random_state=self.config.project.seed)
 
         print(f"Training Model {model_name} \n {model}")
@@ -169,17 +172,17 @@ class TrainFlow(FlowSpec):
 
     @step
     def combine_cv_results(self, inputs):
-        from src.model_evaluation import compute_cv_scores
         import pandas as pd
         ## Get Best Estimators from each Cross Validation Object
         self.results_df = pd.concat([model_results.results_df for model_results in inputs])
         self.optuna_cv_list = [model_results.optuna_cv for model_results in inputs]
 
+        
         ## Merge Artifacts
         self.merge_artifacts(inputs, 
                              exclude = ['optuna_cv', 'results_df', 'optuna_cv_list'])
         
-        
+        self.results_df.to_parquet(os.path.join(self.training_outputs_path, "results.parquet"))
         self.next(self.create_plots)
 
     @step
@@ -215,10 +218,33 @@ class TrainFlow(FlowSpec):
             out_path = os.path.join(self.training_outputs_path,"regression_plot.png")
         )
 
+        self.next(self.select_best_model)
+
+    @step
+    def select_best_model(self):
+        from src.model_evaluation import get_best_model
+        import pickle
+        best_model_name, mean_score, std_score = get_best_model(self.results_df, self.config.project.criterion)
+        model_idx = self.run_models.index(best_model_name)
+        logger.info(f"Best model: {best_model_name} with mean {self.config.project.criterion}: {mean_score:.4f} +- {std_score:.4f}")
+
+        ## Refit on the Full Dataset
+        optuna_cv = self.optuna_cv_list[model_idx]
+        model = optuna_cv.best_estimator_
+        logger.info(f"Reftting {best_model_name} on Entire Dataset")
+        model.fit(self.X, self.y)
+
+        ## Export Pretrained Model
+        # Save the model to a file
+        best_model_path = os.path.join(self.config.output.models_dir, f'{best_model_name}_{self.config.project.criterion}_{mean_score:.2f}_{current.run_id}.pkl')
+        with open(best_model_path, 'wb') as f:
+            pickle.dump(model, f)
+        
         self.next(self.end)
     @step
     def end(self):
         logger.info("Complete")
+
 
 
 if __name__ == "__main__":
