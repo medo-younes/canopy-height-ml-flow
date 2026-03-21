@@ -5,7 +5,7 @@ project:
   epsg: "EPSG:2956"
   test: false
   seed: 420
-  run_models: ['ElasticNet', 'RandomForestRegressor', 'XGBoostRegressor']
+  run_models: ['ElasticNet', 'RandomForestRegressor', 'XGBRegressor']
   criterion: "RMSE"
 
 data:
@@ -74,7 +74,7 @@ models:
   RandomForestRegressor:
     __target__: sklearn.ensemble.RandomForestRegressor
     random_state: ${project.seed}
-  XGBoostRegressor:
+  XGBRegressor:
     __target__: xgboost.XGBRegressor
     random_state: ${project.seed}
     n_jobs: ${training.n_jobs}
@@ -125,7 +125,7 @@ training:
       __target__: optuna.distributions.CategoricalDistribution
       choices: ["sqrt", "log2", 0.5]
 
-  XGBoostRegressor:
+  XGBRegressor:
     n_estimators:
       __target__: optuna.distributions.IntDistribution
       low: 10

@@ -18,7 +18,7 @@ def init_model(model_name, random_state):
         return ElasticNet(max_iter=10000, random_state=random_state)
     elif model_name == "RandomForestRegressor":
         return RandomForestRegressor(random_state=random_state)
-    elif model_name == "XGBoostRegressor":
+    elif model_name == "XGBRegressor":
         return XGBRegressor(random_state=random_state)
     else:
         raise ValueError(f"Unknown model name: {model_name}")
@@ -47,7 +47,7 @@ def get_param_distributions(model_name):
             "min_samples_leaf": optuna.distributions.IntDistribution(1, 10),
             "max_features": optuna.distributions.CategoricalDistribution(["sqrt", "log2", 0.5]),
         }
-    elif model_name == "XGBoostRegressor":
+    elif model_name == "XGBRegressor":
         return {
             'n_estimators': optuna.distributions.IntDistribution(10, 500, log=True),
             'learning_rate': optuna.distributions.FloatDistribution(1e-4, 0.3, log=True),

@@ -27,3 +27,26 @@ def gdf_points_to_ee(gdf, id_col ="id"):
                         ]
 
         return  ee.FeatureCollection(features)
+
+
+def get_embeddings_image(bbox, year, out_epsg = None):
+    bbox_ee =  ee.Geometry.Rectangle(*bbox)
+    year2 = f'{int(year) + 1}-01-01'
+    year1 = f'{year}-01-01'
+    
+    ## Get Satellite Embeddings Image
+    embeddings_col = ee.ImageCollection("GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL")
+    embeddings_image = embeddings_col.filterDate(year1, year2).filterBounds(bbox_ee).mosaic().clip(bbox_ee)
+    
+    # Check if image exists
+    if embeddings_image is None:
+        raise ValueError(f"No embeddings image found for year {year} in bbox {bbox}")
+    
+    # Only reproject if out_epsg is provided and valid
+    if out_epsg is not None:
+        embeddings_image = embeddings_image.reproject(
+            crs=out_epsg,
+            scale=10
+        )
+    
+    return embeddings_image

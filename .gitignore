@@ -10,3 +10,6 @@ py-canlidar
 *.ipynb
 models
 training
+*.parquet
+embeddings
+*.tif

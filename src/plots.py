@@ -65,7 +65,7 @@ def plot_model_comparison_boxplots(results_df, score_names, models,figsize=(10, 
                               whiskerprops=dict(color='black'),
                               capprops=dict(color='black'),
                               flierprops=dict(marker='o', markerfacecolor='red', markersize=5, linestyle='none'),
-                              widths=0.6)
+                              widths=0.4)
             j += 1
 
             ax[i].set_ylabel(score_name)
@@ -126,7 +126,9 @@ def regression_scatter_plot(model_names, data_df, X_cols, y_col, folds, model_ma
     for i, model_name in enumerate(model_names):
 
         preds = cv_outputs[model_name]
-        
+        ## Plot Prediction Scatter Points
+        ax[i].scatter(x = vals, y = preds, s = scatter_size, c = scatter_color)
+
         # Add diagonal line
         # ax[i].plot([lim[0], lim[1]], [lim[0], lim[1]], color='red')
         ax[i].set_aspect('equal', adjustable='box')
@@ -147,7 +149,7 @@ def regression_scatter_plot(model_names, data_df, X_cols, y_col, folds, model_ma
 
         ## Add Line of Best Fit
         a, b = np.polyfit(vals, preds, 1)
-        ax[i].plot(vals, a*vals+b, color = 'green', linewidth = 0.5)
+        ax[i].plot(vals, a*vals+b, color = 'green', linewidth = 0.8)
 
         ## Add Text for results
         ax[i].text(
@@ -162,8 +164,7 @@ def regression_scatter_plot(model_names, data_df, X_cols, y_col, folds, model_ma
         
 
         
-        ## Plot Prediction Scatter Points
-        ax[i].scatter(x = vals, y = preds, s = scatter_size, c = scatter_color)
+        
 
     plt.tight_layout()
     if out_path is not None:

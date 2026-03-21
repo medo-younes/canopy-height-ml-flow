@@ -100,7 +100,7 @@ class TrainFlow(FlowSpec):
         )
 
         if self.test:
-            training_gdf = pd.concat([fold_data.sample(10) for idx, fold_data in training_gdf.groupby(['folds','strata'])]).reset_index()
+            training_gdf = pd.concat([fold_data.sample(55) for idx, fold_data in training_gdf.groupby(['folds','strata'])]).reset_index()
         # ## Prepare Training Data
         self.X  = training_gdf.loc[:, self.X_cols].values ## Independent Variables: Satelite Embeddings 
         self.y = training_gdf.loc[:,self.y_col].values ## Dependent Variable: Tree Canopy Height
