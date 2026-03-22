@@ -50,3 +50,16 @@ def get_embeddings_image(bbox, year, out_epsg = None):
         )
     
     return embeddings_image
+
+
+import geemap
+def download_ee_image_from_bbox(image, bbox, out_path, scale, epsg):
+    bbox_ee  = ee.Geometry.Rectangle(*bbox)
+    crs = f"EPSG:{epsg}"
+    geemap.download_ee_image(
+                            image=image, 
+                            filename=out_path, 
+                            scale = scale,
+                            crs = crs,
+                            region = bbox_ee,
+                        )

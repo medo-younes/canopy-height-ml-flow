@@ -20,14 +20,6 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)  # Reduce other logs
 
 class TrainFlow(FlowSpec):
     '''
-    Canopy Height Estimation with Google Earth Embeddings (GEE) Dataset Preparation Flow
-    1. Retrieves the area of interest (AOI) from config
-    2. Get intersection between AOI and Point Cloud Tile Index
-    3. Generate random n points within Intersection geometry and run spatial K-fold on sample points
-    4. Extract GEE Satellite Embeddings from Sample Points and Export to CSV
-    5. Download LAZ files from AWS S3, compute Height Above Ground (HAG) with PDAL
-    6. Compute Canopy Height Model using 95th Percentile of HAG
-    7. Extract Tree Height Data using 10 x 10 grid cell with UTM CRS transform
     
     Example:
     python flows/data_flow.py run --max-workers 3 --max-num-splits 4000 --test true

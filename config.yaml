@@ -86,8 +86,6 @@ training:
   verbose: 1
   
 
-
-
 # parameters:
   ElasticNet:
     alpha:
@@ -156,3 +154,7 @@ training:
       low: 0.0
       high: 5.0
       log: false
+
+
+predict:
+  tile_size: 2_500 #2 km

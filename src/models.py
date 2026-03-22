@@ -58,3 +58,40 @@ def get_param_distributions(model_name):
         }
     else:
         raise ValueError(f"Unknown model name: {model_name}")
+    
+
+
+import rasterio as rio
+import numpy as np
+
+
+def preprocess_embeddings(data, embedding_dims= 64):
+    data = data.transpose(1,2,0).reshape(-1, embedding_dims)
+    nan_mask = (np.isinf(data) | np.isnan(data)).any(axis = 1)
+    masked_data = data[~nan_mask]
+    return masked_data, nan_mask
+
+
+def postprocess_predictions(preds, data, nan_mask):
+    width, height = data.shape[1:]
+    size = width * height
+    output = np.zeros(shape=(size,), dtype=data.dtype)
+    output[~nan_mask] = preds
+    output = np.where(output < 0, 0, output)
+    return output.reshape(height,width)
+
+def predict_canopy_height_from_embeddings(model, embeddings_path, out_path, embedding_dims= 64):
+    with rio.open(embeddings_path) as src:
+        data = src.read()
+        masked_data, nan_mask = preprocess_embeddings(data)  ## Preprocess Embeddings - mask out nan / inf values
+        preds = model.predict(masked_data) ## Make canopy height predictions with pretrainedm odel
+        preds_image = postprocess_predictions(preds, data, nan_mask) # Postprocess canopy height predictions - fill nan values with zeroes and add predicitons to image
+
+        ## Export PRedicted Canopy Height Model
+        profile = src.profile
+        profile.update({
+            "count": 1
+        })
+        with rio.open(out_path, "w", **profile) as out:
+            out.write(preds_image, 1)
+    return preds_image
