@@ -110,7 +110,7 @@ def duckdb_get_intersection(gdf, in_epsg, intersect_vector_path):
 
 
 
-def read_canopy_height_data(vector_path, min_height, max_height, out_epsg):
+def read_canopy_height_data(vector_path, min_height, max_height):
     import duckdb
 
     con = duckdb.connect()
@@ -119,5 +119,88 @@ def read_canopy_height_data(vector_path, min_height, max_height, out_epsg):
     con.sql(f"CREATE TABLE sample_points AS SELECT *,ST_AsText(geometry) AS wkt FROM read_parquet('{vector_path}')")
     df = con.sql(f"SELECT * FROM sample_points WHERE height > {min_height} AND height <= {max_height}").to_df()
 
+    epsg = get_crs_epsg_from_parquet(vector_path)
     # Create a GeoDataFrame from the DataFrame, converting the WKT column to a geometry column
-    return gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df['wkt']), crs=out_epsg).drop(columns = 'wkt')
+    return gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df['wkt']), crs=epsg).drop(columns = 'wkt')
+
+
+
+def sample_percent_cover_from_mask(gdf, raster_path, band):
+    with rio.open(raster_path) as src:
+        gdf = gdf.to_crs(src.crs)
+        transform = src.transform
+        coords = gdf.geometry.bounds.values
+        windows = [rio.windows.from_bounds(x1, y1,x2,y2, transform) for x1,y1,x2,y2 in coords]
+        return [src.read(band, window = window).mean() for window in windows]
+    
+
+import pyarrow.parquet as pq
+import json
+def get_crs_epsg_from_parquet(file_path):
+    # Read only the metadata (no data loaded into memory)
+    metadata = pq.read_metadata(file_path)
+    
+    # Decode the 'geo' metadata (GeoParquet spec stores CRS here)
+    geo_metadata = json.loads(metadata.metadata[b'geo'].decode('utf-8'))
+    
+    # Extract the EPSG code from the geometry column's CRS
+    crs_info = geo_metadata['columns']['geometry']['crs']
+    epsg_code = crs_info['id']['code']
+    return epsg_code
+
+
+def preprocess_tiles(gdf, forest_raster_path, water_vector_path, min_forest_cover= 0.25):
+
+    ## Compute Forest Percentage Cover
+    gdf['forest_cover'] = sample_percent_cover_from_mask(
+        raster_path = forest_raster_path,
+        band = 1,
+        gdf = gdf,
+    )
+    ## Remove Tiles with low forst cover
+    gdf = gdf[gdf.forest_cover >= min_forest_cover]
+
+    ## Mask out water bocies
+    water_gdf = gpd.read_parquet(water_vector_path).to_crs(gdf.crs)
+    gdf = gdf.overlay(water_gdf[['geometry']], how="difference")
+
+    ## Remove Small tiles based on # of Stds from mean area
+    outlier_area = gdf.area.mean() - gdf.area.std() * 3.0
+    gdf = gdf[gdf.area > outlier_area]
+    return gdf
+
+
+
+from osgeo import gdal
+
+
+    
+def clip_raster_with_vector(raster_path, vector_path, output_path, nodata_value=-9999.0):
+    """
+    Clips a raster file using a vector polygon mask.
+
+    :param input_raster: Path to the input raster file (e.g., 'input.tif').
+    :param input_vector: Path to the clipping vector file (e.g., 'clip.shp').
+    :param output_raster: Path for the output clipped raster file (e.g., 'output.tif').
+    :param nodata_value: The value to use for pixels outside the clip area.
+    """
+    vector_epsg = get_crs_epsg_from_parquet(vector_path)
+    try:
+
+        # Use gdal.Warp to perform the clipping operation
+        ds = gdal.Warp(
+            output_path,
+            raster_path,
+            format='GTiff',  # Output format (GeoTIFF is common)
+            cutlineDSName=vector_path,  # The vector dataset to use as a cutline
+            cropToCutline=True,  # Crops the output extent to the cutline's bounding box
+            dstNodata=nodata_value,  # Set the NoData value for areas outside the mask
+            creationOptions=['COMPRESS=LZW'], # Optional: Adds LZW compression
+            cutlineSRS = f"EPSG:{vector_epsg}"
+        )
+        # Close the dataset
+        ds = None
+        print(f"Successfully clipped raster saved to {output_path}")
+
+    except Exception as e:
+        print(f"An error occurred: {e}")

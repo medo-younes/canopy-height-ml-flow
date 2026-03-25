@@ -1,15 +1,14 @@
 project:
-  name: test2
+  name: canopy-height-ml-flow
   datasource: canelevation
   aoi_name: "Wood Buffalo National Park of Canada"
-  epsg: "EPSG:2956"
   test: false
   seed: 420
   run_models: ['ElasticNet', 'RandomForestRegressor', 'XGBRegressor']
   criterion: "RMSE"
 
+# Data processing parameters
 data:
-  root: data
   res_m: 10
   chm:
     statistic: P95
@@ -30,34 +29,56 @@ data:
   filter:
     min_height: 0
     max_height: 50
-  canelevation:
-    get_aoi:
-      __target__: get_aoi
-      sites_path: ${input.sites_path}
-      name_col: DESC_EN
-      aoi_name: ${project.aoi_name}
-      
+    min_forest_cover: 0.25
+  get_aoi:
+    __target__: get_aoi
+    sites_path: ${datasources.canelevation.sites}
+    name_col: DESC_EN
+    aoi_name: ${project.aoi_name}
 
-input:  
-  dir: ${data.root}/${project.datasource}
-  laz_dir: ${input.dir}/laz
-  hag_dir: ${input.dir}/hag
-  chm_dir: ${input.dir}/chm
-  stratified_dir: ${input.dir}/stratified
-  tile_index_path: ${input.dir}/tile_index.parquet
-  sites_path: ${input.dir}/sites.geojson
-  water_path: ${input.dir}/water_bodies.parquet
-output:
-  dir: ${data.root}/runs
-  embeddings_dir: ${output.dir}/embeddings
-  aoi_path: ${output.dir}/aoi.geojson
-  tiles_aoi_path: ${output.dir}/tiles_aoi.parquet
-  tiles_aoi_bounds_path: ${output.dir}/tiles_aoi.geojson
-  sample_points_path: ${output.dir}/sample_points.parquet
-  training_outputs_dir: training
-  models_dir: models
-  
-  
+
+datasources:
+  canelevation:
+    sites: data/canelevation/sites.parquet
+    tile_index: data/canelevation/tile_index.parquet
+    water_bodies: data/canelevation/water_bodies.parquet
+# File paths organization
+paths:
+  project:
+    root: projects/${project.aoi_name}
+    aoi: ${paths.project.root}/aoi.parquet
+    tiles_aoi: ${paths.project.root}/tiles_aoi.parquet
+    tiles_aoi_bounds: ${paths.project.root}/tiles_aoi_bounds.parquet
+    forest_mask: ${paths.project.root}/forest.tif
+    water_bodies: ${paths.project.root}/water.parquet
+  ## Raw Data Inputs
+  raw:
+    root: ${paths.project.root}/raw
+    laz: ${paths.raw.root}/laz
+    embeddings: ${paths.raw.root}/embeddings
+  # Processed intermediate data (regenerable)
+  prc:
+    root: ${paths.project.root}/prc
+    chm:  ${paths.prc.root}/chm
+    stratified: ${paths.prc.root}/stratified
+  training:
+    root: ${paths.project.root}/training
+    data:  ${paths.training.root}/data
+    outputs: ${paths.training.root}/outputs
+    ch_samples: ${paths.training.data}/canopy_heights
+    embedding_samples: ${paths.training.data}/embeddings
+    sample_points_path: ${paths.training.data}/sample_points.parquet
+    training_data: ${paths.training.data}/training_data.parquet
+    blocks: ${paths.training.data}/blocks.parquet
+  # Runtime artifacts (run-specific, ephemeral)
+  predictions:
+    root: ${paths.project.root}/predictions
+  models:
+    root: models
+
+
+
+    
 aws:
   canelevation:
     region: 'ca-central-1'

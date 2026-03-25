@@ -22,7 +22,7 @@ class CanopyHeightInferenceFlow(FlowSpec):
     '''
     
     Example:
-    python flows/predict.py run --max-workers 8 --max-num-splits 4000 --test true --model-checkpoint ElasticNet_RMSE_3.94_1774094444055350.pkl
+    python flows/inference.py run --max-workers 8 --max-num-splits 4000 --test true --model-checkpoint ElasticNet_RMSE_3.94_1774094444055350.pkl
     '''
     
     config_path = Parameter(
@@ -42,6 +42,12 @@ class CanopyHeightInferenceFlow(FlowSpec):
         default = False,
         required = False
     )
+    cache_run_id = Parameter(
+        "cache-run-id",
+        help = "Path to config YAML for configuring metaflow pipeline.",
+        default = None,
+        required = False
+    )
     
     
     config = Config("config", default = "config.yaml", parser = omega_parse)
@@ -50,11 +56,11 @@ class CanopyHeightInferenceFlow(FlowSpec):
     def start(self):
       
         ## Setup output Directory
-        data_dir = self.config.data.root
-        aoi_dir_name =  self.config.project.aoi_name.replace(" ", "_")
-        self.embeddings_dir = os.path.join(data_dir, "embeddings",aoi_dir_name)
-        self.model_checkpoint_path = os.path.join(self.config.output.models_dir, self.model_checkpoint) ## TODO: Get Model from MLFLow registry
-        self.canopy_height_preds_dir = os.path.join(data_dir, "predictions", aoi_dir_name, str(current.run_id))
+        aoi_dir_name =  self.config.project.aoi_name
+        self.embeddings_dir = self.config.paths.raw.embeddings
+        self.model_checkpoint_path = os.path.join(self.config.paths.models.root, self.model_checkpoint) ## TODO: Get Model from MLFLow registry
+        self.canopy_height_preds_dir = os.path.join(self.config.paths.predictions.root, str(current.run_id) if self.cache_run_id is None else self.cache_run_id)
+        self.grid_path = os.path.join(self.canopy_height_preds_dir, 'grid.parquet')
         self.embeddings_vrt_path = os.path.join(self.embeddings_dir, f'embeddings_{aoi_dir_name}.vrt')
         self.canopy_heights_preds_vrt_path = os.path.join(self.canopy_height_preds_dir, f'canopy_height_{aoi_dir_name}.vrt')
         ## Create Dirs
@@ -68,11 +74,11 @@ class CanopyHeightInferenceFlow(FlowSpec):
     def read_data(self):
         from src.data import get_aoi
         from spatialkfold.blocks import spatial_blocks
-
+        import geopandas as gpd
         logger.info(f"Fetching AOI for {self.config.project.aoi_name}")
         self.aoi_gdf = get_aoi(
-                    sites_path=self.config.data.canelevation.get_aoi.sites_path,
-                    name_col=self.config.data.canelevation.get_aoi.name_col,
+                    sites_path=self.config.data.get_aoi.sites_path,
+                    name_col=self.config.data.get_aoi.name_col,
                     aoi_name=self.config.project.aoi_name
                     )
         
@@ -88,16 +94,25 @@ class CanopyHeightInferenceFlow(FlowSpec):
             self.aoi_gdf = self.aoi_gdf.set_geometry([clipped_polygon])
         
         logger.info(f"Constructing Mesh Grid for {self.config.project.aoi_name}")
-        self.grid_gdf = spatial_blocks(
-            gdf = self.aoi_gdf,
-            width = self.config.predict.tile_size,
-            height = self.config.predict.tile_size,
-            nfolds=1,
-        ).reset_index().rename(columns = {'index': 'id'}).sort_values('id')
+
+        if os.path.exists(self.grid_path):
+            from glob import glob
+            grid_gdf = gpd.read_parquet(self.grid_path)
+            paths = glob(os.path.join(self.canopy_height_preds_dir, "*.tif"))
+            pred_ids = [int(os.path.basename(p).split('.')[0]) for p in paths]
+            self.grid_gdf = grid_gdf[~grid_gdf.id.isin(pred_ids)]
+        else:
+            self.grid_gdf = spatial_blocks(
+                gdf = self.aoi_gdf,
+                width = self.config.predict.tile_size,
+                height = self.config.predict.tile_size,
+                nfolds=1,
+            ).reset_index().rename(columns = {'index': 'id'}).sort_values('id')
+            self.grid_gdf.to_parquet(self.grid_path)
 
         self.grid_ids = self.grid_gdf.id.to_list()
         logger.info(f"Yielded {len(self.grid_ids)} Grid Cells Accross {self.config.project.aoi_name}")
-        self.grid_gdf.to_parquet(os.path.join(self.canopy_height_preds_dir, "grid.parquet"))
+        
         self.next(self.load_model)
 
     
@@ -113,6 +128,7 @@ class CanopyHeightInferenceFlow(FlowSpec):
 
         logger.info("Model Successfully Loaded")
         
+
         self.next(self.get_ee_image)
 
 
@@ -120,6 +136,7 @@ class CanopyHeightInferenceFlow(FlowSpec):
     def get_ee_image(self):
         
         import ee
+        from glob import glob
         from src.ee_utils import get_embeddings_image
         auth_gee_from_env()
 
@@ -158,15 +175,17 @@ class CanopyHeightInferenceFlow(FlowSpec):
                 )
             
         ##PRedict Tree Canopy Height with pretrained Model
-        logger.info(f"Predicting Canopy Height: Grid ID {grid_id} | BBOX {bbox}")
-        predict_canopy_height_from_embeddings(
-            model= self.model,
-            embeddings_path= embeddings_path,
-            out_path = canopy_height_path
-        )   
+        if os.path.exists(canopy_height_path) == False:
+            logger.info(f"Predicting Canopy Height: Grid ID {grid_id} | BBOX {bbox}")
+            predict_canopy_height_from_embeddings(
+                model = self.model,
+                embeddings_path = embeddings_path,
+                out_path = canopy_height_path
+            )   
 
-        self.canopy_height_path = canopy_height_path
-        self.embeddings_path = embeddings_path
+        if os.path.exists(canopy_height_path):
+            self.canopy_height_path = canopy_height_path
+            self.embeddings_path = embeddings_path
 
         self.next(self.join)
 
@@ -174,9 +193,8 @@ class CanopyHeightInferenceFlow(FlowSpec):
     @step
     def join(self, inputs):
         from osgeo import gdal
-        ## Get VRT Tile Paths
-        canopy_height_vrt_tiles = [i.canopy_height_path for i in inputs]
-        # embeddings_vrt_tiles = [i.embeddings_path for i in inputs]
+        from glob import glob
+        from src.geo_utils import clip_raster_with_vector
 
         logger.info("Merging Artifacts")
         self.merge_artifacts(inputs,
@@ -188,11 +206,25 @@ class CanopyHeightInferenceFlow(FlowSpec):
 
 
         ## Write VRT for Emebddings and Canopy Height Predictions
-        # vrt_embeddings = gdal.BuildVRT(self.embeddings_vrt_path, embeddings_vrt_tiles)
-        vrt_ch = gdal.BuildVRT(self.canopy_heights_preds_vrt_path, canopy_height_vrt_tiles)
+        ## Get VRT Tile Paths
+        logger.info(f"Building VRT")
+        ch_pred_paths = glob(os.path.join(self.canopy_height_preds_dir, "*.tif"))
+        vrt_ch = gdal.BuildVRT(
+            destName = self.canopy_heights_preds_vrt_path, 
+            srcDSOrSrcDSTab=ch_pred_paths
+        )
 
         # vrt_embeddings = None
         vrt_ch = None
+
+        ## Clip VRT To AOI Polygon
+        logger.info(f"Clipping VRT to AOI Extent")
+        clip_raster_with_vector(
+            raster_path=self.canopy_heights_preds_vrt_path, 
+            vector_path=self.config.paths.project.aoi, 
+            output_path=self.canopy_heights_preds_vrt_path
+            )
+
         self.next(self.end)
     @step
     def end(self):

@@ -63,3 +63,24 @@ def download_ee_image_from_bbox(image, bbox, out_path, scale, epsg):
                             crs = crs,
                             region = bbox_ee,
                         )
+
+
+
+def get_ee_forest_mask(bbox, out_epsg = 4326, out_path = None):
+    bbox_ee = ee.Geometry.Rectangle(*bbox)
+    forests_col = ee.ImageCollection("projects/sat-io/open-datasets/GLOBAL-NATURAL-PLANTED-FORESTS")
+    forests_col=forests_col.filterBounds(bbox_ee)
+    forest_image = forests_col.mosaic()
+    forest_image = forest_image.select('b1').neq(127).Or(forest_image.select('b2').neq(127)).Or(forest_image.select('b3').neq(127))
+    forest_image = forest_image.clip(bbox_ee)
+
+    if out_path is not None:
+        geemap.download_ee_image(
+            image = forest_image,
+            filename = out_path,
+            crs = f"EPSG:{out_epsg}",
+            scale = 30,
+            region = bbox_ee
+        )
+
+    return forest_image

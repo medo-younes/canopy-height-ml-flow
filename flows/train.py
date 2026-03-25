@@ -22,7 +22,7 @@ class TrainFlow(FlowSpec):
     '''
     
     Example:
-    python flows/data_flow.py run --max-workers 3 --max-num-splits 4000 --test true
+    python flows/train.py run --max-workers 3 --max-num-splits 4000
     '''
     
     config_path = Parameter(
@@ -51,22 +51,13 @@ class TrainFlow(FlowSpec):
       
         ## Setup output Directory
         project_id = str(current.run_id)
-        dataset_id = str(self.dataset_id)
-        self.training_outputs_path = os.path.join(self.config.output.training_outputs_dir,project_id)
-        self.out_dir = os.path.join(self.config.output.dir, dataset_id)
-        self.embeddings_dir = os.path.join(self.out_dir, "embeddings")
-        self.ch_dir = os.path.join(self.out_dir, "canopy_heights")
-        self.aoi_path = os.path.join(self.out_dir, "aoi.parquet")
-        self.tiles_aoi_path = os.path.join(self.out_dir, "tiles_aoi.parquet")
-        self.tiles_aoi_bounds_path = os.path.join(self.out_dir, "tiles_aoi_bounds.parquet")
-        self.embeddings_csv_path = os.path.join(self.out_dir,'embeddings.csv')
-        self.training_data_path = os.path.join(self.out_dir,'training.parquet')
-        self.sample_points_path = os.path.join(self.out_dir,'sample_points.parquet')
-        self.blocks_path = os.path.join(self.out_dir,'blocks.parquet')
+        self.training_outputs_path = os.path.join(self.config.paths.training.outputs, project_id)
+        self.training_data_path = self.config.paths.training.training_data
         
         ## Create Dirs
         os.makedirs(self.training_outputs_path, exist_ok=True)
-
+        
+    
         ## Setup 
         self.n_jobs = os.cpu_count() - 4
         self.X_cols = [f"A{str(i).zfill(2)}" for i in range(64)]
@@ -84,15 +75,27 @@ class TrainFlow(FlowSpec):
         import pandas as pd
 
         ## Read Training Data GeoParquet using DuckDB
-        training_gdf: gpd.GeoDataFrame = read_canopy_height_data(
+        training_gdf = read_canopy_height_data(
             vector_path=self.training_data_path,
             min_height = self.config.data.filter.min_height ,
             max_height= self.config.data.filter.max_height,
-            out_epsg = self.config.project.epsg
         )
 
+        ## Exclude Noise
+        exclude_path = "projects/Gros Morne National Park of Canada/exclude.txt"
+
+        logger.info(f"Dataset size: {len(training_gdf)}")
+        if os.path.exists(exclude_path):
+            tiles_aoi_gdf = gpd.read_parquet(self.config.paths.project.tiles_aoi)
+            exclude_df = pd.read_csv(exclude_path)
+            exclude_df= pd.merge(exclude_df, tiles_aoi_gdf, left_on='tile_name', right_on="Tile_name")
+            exclude_gdf = gpd.GeoDataFrame(exclude_df, geometry='geometry', crs = tiles_aoi_gdf.crs)
+            training_gdf = training_gdf.overlay(exclude_gdf.to_crs(training_gdf.crs), how='difference')
+            logger.info(f"Excluding Noisy Data > Dataset size: {len(training_gdf)}")
         if self.test:
             training_gdf = pd.concat([fold_data.sample(55) for idx, fold_data in training_gdf.groupby(['folds','strata'])]).reset_index()
+
+
         # ## Prepare Training Data
         self.X  = training_gdf.loc[:, self.X_cols].values ## Independent Variables: Satelite Embeddings 
         self.y = training_gdf.loc[:,self.y_col].values ## Dependent Variable: Tree Canopy Height
@@ -228,7 +231,7 @@ class TrainFlow(FlowSpec):
 
         ## Export Pretrained Model
         # Save the model to a file
-        best_model_path = os.path.join(self.config.output.models_dir, f'{best_model_name}_{self.config.project.criterion}_{mean_score:.2f}_{current.run_id}.pkl')
+        best_model_path = os.path.join(self.config.paths.outputs.models, f'{best_model_name}_{self.config.project.criterion}_{mean_score:.2f}_{current.run_id}.pkl')
         with open(best_model_path, 'wb') as f:
             pickle.dump(model, f)
         

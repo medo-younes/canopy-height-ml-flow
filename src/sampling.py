@@ -40,8 +40,10 @@ def sample_raster_points(vector_path, raster_path):
     gdf = gpd.read_parquet(vector_path)
     if gdf.geometry.type.iloc[0] != "Point":
         gdf = gdf.set_geometry(gdf.centroid)
-    xy = gdf.get_coordinates().values
+    
     with rio.open(raster_path) as src:
+        gdf = gdf.to_crs(src.crs)
+        xy = gdf.get_coordinates().values
         samples = src.sample(xy)
         return [float(sample.squeeze()) for sample in samples]
 

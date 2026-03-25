@@ -2,6 +2,9 @@ from sklearn.linear_model import ElasticNet
 from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
 import optuna
+import os
+
+
 
 
 def init_model(model_name, random_state):
@@ -73,25 +76,31 @@ def preprocess_embeddings(data, embedding_dims= 64):
 
 
 def postprocess_predictions(preds, data, nan_mask):
-    width, height = data.shape[1:]
+    height, width = data.shape[1:]
     size = width * height
-    output = np.zeros(shape=(size,), dtype=data.dtype)
+    output = np.full(shape=(size,), fill_value=np.nan, dtype=np.float32)
     output[~nan_mask] = preds
-    output = np.where(output < 0, 0, output)
-    return output.reshape(height,width)
+    output = np.maximum(output, 0, where=~np.isnan(output), out=output)
+    return output.reshape(height, width)
 
-def predict_canopy_height_from_embeddings(model, embeddings_path, out_path, embedding_dims= 64):
+def predict_canopy_height_from_embeddings(model, embeddings_path, out_path, embedding_dims= 64, out_dtype = rio.float32):
     with rio.open(embeddings_path) as src:
         data = src.read()
-        masked_data, nan_mask = preprocess_embeddings(data)  ## Preprocess Embeddings - mask out nan / inf values
-        preds = model.predict(masked_data) ## Make canopy height predictions with pretrainedm odel
-        preds_image = postprocess_predictions(preds, data, nan_mask) # Postprocess canopy height predictions - fill nan values with zeroes and add predicitons to image
+        masked_data, nan_mask = preprocess_embeddings(data, embedding_dims)  ## Preprocess Embeddings - mask out nan / inf values
 
-        ## Export PRedicted Canopy Height Model
-        profile = src.profile
-        profile.update({
-            "count": 1
-        })
-        with rio.open(out_path, "w", **profile) as out:
-            out.write(preds_image, 1)
-    return preds_image
+        size = masked_data.shape[0]
+        if size > 0:
+            preds = model.predict(masked_data) ## Make canopy height predictions with pretrainedm odel
+            preds_image = postprocess_predictions(preds, data, nan_mask) # Postprocess canopy height predictions - fill nan values with zeroes and add predicitons to image
+
+            ## Export PRedicted Canopy Height Model
+            profile = src.profile
+            profile.update({
+                "count": 1,
+                "dtype": out_dtype
+            })
+            with rio.open(out_path, "w", **profile) as out:
+                out.write(preds_image, 1)
+            return preds_image
+        else:
+            return None

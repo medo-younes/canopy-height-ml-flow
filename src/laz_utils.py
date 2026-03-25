@@ -1,5 +1,7 @@
+
+import laspy
 def is_copc_vlr_present(path):
-    import laspy
+
     try:
         with laspy.open(path) as f:
             vlrs = [vlr.user_id.lower() for vlr in f.header.vlrs]
@@ -7,3 +9,13 @@ def is_copc_vlr_present(path):
             return "copc" in vlrs or "copc" in evlrs
     except Exception as e:
         return False
+    
+
+
+def get_epsg_authority_from_laz(laz_path):
+    las = laspy.read(laz_path)
+    crs = las.header.parse_crs()
+    try: 
+        return ":".join(crs.to_authority())
+    except:
+        return ":".join(crs.sub_crs_list[0].to_authority())

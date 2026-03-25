@@ -28,7 +28,10 @@ dependencies:
   - azure-storage-blobs-cpp=12.16.0=hdd73cc9_1
   - azure-storage-common-cpp=12.12.0=ha7a2c86_1
   - azure-storage-files-datalake-cpp=12.14.0=h52c5a47_1
+  - backports.zstd=1.3.0=py310h69bd2ac_0
   - blosc=1.21.6=he440d0b_1
+  - branca=0.8.2=pyhd8ed1ab_0
+  - brotli-python=1.2.0=py310hba01987_1
   - bzip2=1.0.8=h5eee18b_6
   - c-ares=1.34.6=hb03c661_0
   - c-blosc2=2.23.0=hc31b594_0
@@ -51,7 +54,9 @@ dependencies:
   - expat=2.7.4=h7354ed3_0
   - fgt=0.4.11=h87365c0_1
   - fmt=12.1.0=hff5e90c_0
+  - folium=0.20.0=pyhd8ed1ab_0
   - freexl=2.0.0=h9dce30a_2
+  - gdal=3.12.2=py310hea6e582_3
   - geos=3.14.1=h480dda7_0
   - geotiff=1.7.4=h1000f5c_4
   - gflags=2.2.2=h5888daf_1005
@@ -59,10 +64,15 @@ dependencies:
   - glog=0.7.1=hbabe93e_0
   - gmp=6.3.0=hac33072_2
   - google-cloud-sdk=561.0.0=py310hff52083_0
+  - h2=4.3.0=pyhcf101f3_0
   - hdf5=1.14.6=nompi_h19486de_106
+  - hpack=4.1.0=pyhd8ed1ab_0
+  - hyperframe=6.1.0=pyhd8ed1ab_0
   - icu=78.2=h33c6efd_0
+  - idna=3.11=pyhd8ed1ab_0
   - ipykernel=7.2.0=pyha191276_1
   - jedi=0.19.2=pyhd8ed1ab_1
+  - jinja2=3.1.6=pyhcf101f3_1
   - json-c=0.18=h6688a6e_0
   - jupyter_client=8.8.0=pyhcf101f3_0
   - jupyter_core=5.9.1=pyhc90fa1f_0
@@ -183,6 +193,7 @@ dependencies:
   - libzlib=1.3.1=hb25bd0a_0
   - lz4-c=1.10.0=h5888daf_1
   - lzo=2.10=h280c20c_1002
+  - markupsafe=3.0.3=py310h3406613_1
   - matplotlib-inline=0.2.1=pyhd8ed1ab_0
   - metis=5.1.0=hd0bcaf9_1007
   - minizip=4.0.10=h05a5f5f_0
@@ -215,6 +226,7 @@ dependencies:
   - ptyprocess=0.7.0=pyhd8ed1ab_1
   - pure_eval=0.2.3=pyhd8ed1ab_1
   - pygments=2.19.2=pyhd8ed1ab_0
+  - pysocks=1.7.1=pyha55dd90_7
   - python=3.10.19=h6fa692b_0
   - python-dateutil=2.9.0.post0=pyhe01879c_2
   - python-pdal=3.5.3=np2py310hf3e7d34_4
@@ -223,6 +235,7 @@ dependencies:
   - rdma-core=61.0=h192683f_0
   - re2=2025.11.05=h5301d42_1
   - readline=8.3=hc2a1206_0
+  - requests=2.32.5=pyhcf101f3_1
   - s2n=1.6.2=he8a4886_1
   - setuptools=80.10.2=py310h06a4308_0
   - six=1.17.0=pyhe01879c_1
@@ -240,6 +253,7 @@ dependencies:
   - ucc=1.6.0=hcedbda0_2
   - ucx=1.20.0=hbe80e26_1
   - uriparser=0.9.8=hac33072_0
+  - urllib3=2.6.3=pyhd8ed1ab_0
   - wcwidth=0.6.0=pyhd8ed1ab_0
   - wheel=0.46.3=py310h06a4308_0
   - xerces-c=3.3.0=hd9031aa_1
@@ -247,6 +261,7 @@ dependencies:
   - xorg-libxau=1.0.12=h9b100fa_0
   - xorg-libxdmcp=1.1.5=h9b100fa_0
   - xorg-xorgproto=2024.1=h5eee18b_1
+  - xyzservices=2025.11.0=pyhd8ed1ab_0
   - xz=5.8.2=ha02ee65_0
   - xz-gpl-tools=5.8.2=ha02ee65_0
   - xz-tools=5.8.2=hb03c661_0
@@ -267,7 +282,6 @@ dependencies:
       - boto3==1.42.49
       - botocore==1.42.49
       - bqplot==0.12.45
-      - branca==0.8.2
       - cattrs==26.1.0
       - certifi==2026.1.4
       - cffi==2.0.0
@@ -293,11 +307,11 @@ dependencies:
       - fastjsonschema==2.21.2
       - filelock==3.24.0
       - flask==3.1.2
-      - folium==0.20.0
       - fonttools==4.61.1
       - fsspec==2026.2.0
       - future==1.0.0
       - gcloud==0.18.3
+      - geedim==1.9.1
       - geemap==0.37.1
       - geocoder==1.38.1
       - geographiclib==2.1
@@ -316,7 +330,6 @@ dependencies:
       - grpcio==1.78.0
       - httplib2==0.31.2
       - hydra-core==1.3.2
-      - idna==3.11
       - importlib-metadata==8.7.1
       - ipyevents==2.0.4
       - ipyfilechooser==0.6.0
@@ -325,7 +338,6 @@ dependencies:
       - ipywidgets==8.1.8
       - isort==7.0.0
       - itsdangerous==2.2.0
-      - jinja2==3.1.6
       - jmespath==1.1.0
       - joblib==1.5.3
       - jsonschema==4.26.0
@@ -338,13 +350,14 @@ dependencies:
       - locket==1.0.0
       - logger==1.4
       - mako==1.3.10
+      - mapclassify==2.8.1
       - markdown==3.10.2
       - markdown-it-py==4.0.0
-      - markupsafe==3.0.3
       - matplotlib==3.10.8
       - mccabe==0.7.0
       - mdurl==0.1.2
       - metaflow==2.19.19
+      - mgrs==1.5.4
       - mpmath==1.3.0
       - msgpack==1.1.2
       - narwhals==2.16.0
@@ -398,7 +411,6 @@ dependencies:
       - rasterio==1.4.4
       - ratelim==0.1.6
       - referencing==0.37.0
-      - requests==2.32.5
       - requests-cache==1.3.1
       - retrying==1.4.2
       - rich==14.3.3
@@ -430,12 +442,10 @@ dependencies:
       - tzdata==2025.3
       - uritemplate==4.2.0
       - url-normalize==2.2.1
-      - urllib3==2.6.3
       - werkzeug==3.1.5
       - widgetsnbextension==4.0.15
       - wrapt==2.1.2
       - xgboost==3.2.0
-      - xyzservices==2025.11.0
       - zict==3.0.0
       - zipp==3.23.0
 prefix: /home/younes/anaconda3/envs/pc-flow

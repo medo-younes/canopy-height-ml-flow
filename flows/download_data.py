@@ -5,7 +5,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from metaflow import FlowSpec, step, Config, resources, Parameter, current
+from metaflow import FlowSpec, step, Config, catch, Parameter, current
 import os
 from src import *
 from src.pdal_ops import *
@@ -55,7 +55,7 @@ class DataFlow(FlowSpec):
     test_size = Parameter(
         "test-size",
         help = "Size of test sample size",
-        default = 100,
+        default = 10,
         required = False
     )
     skip_lidar = Parameter(
@@ -70,27 +70,20 @@ class DataFlow(FlowSpec):
 
     @step
     def start(self):
-      
+        from src.data import create_project_dirs
+        print(self.config.paths.project.root)
         ## Setup output Directory
         project_id = str(self.cache_run_id) if self.cache_run_id is not None else str(current.run_id) 
-        self.out_dir = os.path.join(self.config.output.dir, "test" if self.test else project_id)
-        self.embeddings_dir = os.path.join(self.out_dir, "embeddings")
-        self.ch_dir = os.path.join(self.out_dir, "canopy_heights")
-        self.aoi_path = os.path.join(self.out_dir, "aoi.parquet")
-        self.tiles_aoi_path = os.path.join(self.out_dir, "tiles_aoi.parquet")
-        self.tiles_aoi_bounds_path = os.path.join(self.out_dir, "tiles_aoi_bounds.parquet")
-        self.embeddings_csv_path = os.path.join(self.out_dir,'embeddings.csv')
-        self.training_data_path = os.path.join(self.out_dir,'training.parquet')
-        self.sample_points_path = os.path.join(self.out_dir,'sample_points.parquet')
-        self.blocks_path = os.path.join(self.out_dir,'blocks.parquet')
+        self.out_dir = os.path.join(self.config.paths.training.data, project_id)
+        
+
+ 
+        # Create all project directories
+        create_project_dirs(self.config)
         os.makedirs(self.out_dir, exist_ok=True)
-        os.makedirs(self.ch_dir, exist_ok=True)
-        os.makedirs(self.embeddings_dir, exist_ok=True)
 
-
-        self.water_gdf = gpd.read_parquet(self.config.input.water_path)
-        self.water_epsg = self.water_gdf.crs.to_epsg()
-        del self.water_gdf
+    
+    
         logger.info(f"Output Directory: {self.out_dir}")
         self.next(self.get_aoi_and_tiles)
 
@@ -98,7 +91,12 @@ class DataFlow(FlowSpec):
     @step
     def get_aoi_and_tiles(self):
 
+        from src.ee_utils import get_ee_forest_mask, auth_gee_from_env
+        from src.geo_utils import preprocess_tiles
+        from src.duckdb_utils import download_overture_water_bodies
+        from glob import glob
 
+        paths = self.config.paths
         if self.cache_run_id is not None:
             self.aoi_gdf = gpd.read_parquet(self.aoi_path)
             self.tiles_aoi_bounds_gdf = gpd.read_parquet(self.tiles_aoi_bounds_path)
@@ -110,41 +108,78 @@ class DataFlow(FlowSpec):
             logger.info(f"Loading Data from Cache..")
         else:
             ## Read AOI GDF
-            aoi_config = self.config.data[self.config.project.datasource].get_aoi
+            aoi_config = self.config.data.get_aoi
             aoi_gdf = get_aoi(
-                            sites_path=aoi_config.sites_path,
+                            sites_path=self.config.datasources[self.config.project.datasource].sites,
                             name_col=aoi_config.name_col,
                             aoi_name=self.config.project.aoi_name
-                            ).to_crs(self.config.project.epsg)
+                            )
+            self.utm_crs = aoi_gdf.estimate_utm_crs()
+            aoi_gdf.to_crs(self.utm_crs)
             
             ## Read Tile Index
-            tile_index_gdf = gpd.read_parquet(self.config.input.tile_index_path).to_crs(self.config.project.epsg)
+            tile_index_gdf = gpd.read_parquet(self.config.datasources[self.config.project.datasource].tile_index).to_crs(self.utm_crs)
 
             ## Spatial Join Tile Index and AOI
-            tiles_aoi_gdf = gpd.sjoin(tile_index_gdf,aoi_gdf[['geometry']], predicate='intersects', how='inner')
+            tiles_aoi_gdf = gpd.sjoin(tile_index_gdf,aoi_gdf[['geometry']].to_crs(tile_index_gdf.crs), predicate='intersects', how='inner')
             tiles_aoi_gdf = tiles_aoi_gdf[tiles_aoi_gdf.geometry.is_valid]
             tiles_aoi_gdf['tile_id'] = list(range(len(tiles_aoi_gdf)))
 
             ## Get Single geometry of tile boundaries
-            tiles_aoi_geom = tiles_aoi_gdf.to_crs(self.config.project.epsg).buffer(2).reset_index().dissolve().buffer(-2).rename('geometry').reset_index()
+            tiles_aoi_geom = tiles_aoi_gdf.to_crs(self.utm_crs).buffer(2).reset_index().dissolve().buffer(-2).rename('geometry').reset_index()
             tiles_aoi_bounds_gdf = tiles_aoi_gdf.dissolve().set_geometry(tiles_aoi_geom.geometry.values)
-            
             tiles_aoi_gdf = tiles_aoi_gdf.sample(self.test_size) if self.test else tiles_aoi_gdf
+
+            ## Download Forest Mask
+            bbox_4326 = aoi_gdf.to_crs(4326).total_bounds
+            
+            if not os.path.exists(self.config.paths.project.forest_mask):
+                auth_gee_from_env()
+                get_ee_forest_mask(
+                    bbox_4326,
+                    out_path =self.config.paths.project.forest_mask, 
+                    out_epsg = self.utm_crs.to_epsg()
+                    )
+            
+            ## Download Water Bodies Vector Layer
+            if not os.path.exists(self.config.paths.project.water_bodies):
+                download_overture_water_bodies(
+                    bbox =bbox_4326,
+                    out_path = self.config.paths.project.water_bodies
+                )
+            ## Preprocess Tiles - filter out tiles without forest cover and intersecting with water
+            org_length = len(tiles_aoi_gdf)
+            tiles_aoi_gdf = preprocess_tiles(
+                gdf = tiles_aoi_gdf,
+                forest_raster_path= self.config.paths.project.forest_mask,
+                min_forest_cover = self.config.data.filter.min_forest_cover,
+                water_vector_path = self.config.paths.project.water_bodies
+            )
+            logger.info(f"Tile Preprocessing: {org_length - len(tiles_aoi_gdf)} Tiles Filtered out")
+
             ## Export geometries
-            aoi_gdf.to_parquet(self.aoi_path)
-            tiles_aoi_bounds_gdf.to_parquet(self.tiles_aoi_bounds_path)
-            tiles_aoi_gdf.to_parquet(self.tiles_aoi_path)
+            aoi_gdf.to_parquet(paths.project.aoi)
+            tiles_aoi_bounds_gdf.to_parquet(paths.project.tiles_aoi_bounds)
+            tiles_aoi_gdf.to_parquet(paths.project.tiles_aoi)
 
             ## Pass artifacts
             self.aoi_gdf = aoi_gdf
             self.tiles_aoi_bounds_gdf = tiles_aoi_bounds_gdf
             self.tiles_aoi_gdf = tiles_aoi_gdf
-            self.tile_ids = self.tiles_aoi_gdf.tile_id.to_list()
+
+            ## Filter out existing samples
+            ch_files = glob(os.path.join(self.config.paths.training.ch_samples, "*.parquet"))
+            ch_exists = self.tiles_aoi_gdf.Tile_name.isin([os.path.basename(file).split('.')[0] for file in ch_files])
+            self.tile_ids = self.tiles_aoi_gdf[~ch_exists].tile_id.to_list()
+      
+
+            if len(self.tile_ids) == 0:
+                self.tile_ids = [self.tiles_aoi_gdf.iloc[0].tile_id]
 
         logger.info(f"Processing {len(self.tile_ids)} Point Cloud Tiles")
         self.next(self.get_lidar_data, foreach='tile_ids')
 
-
+    @catch(var = "get_lidar_data_failed")
     @step
     def get_lidar_data(self):
         from src.laz_utils import is_copc_vlr_present
@@ -152,23 +187,27 @@ class DataFlow(FlowSpec):
         from src.geo_utils import stratify_raster, duckdb_get_intersection
         from src.sampling import generate_stratified_random_points, vectorize_strata, sample_raster_points
         import uuid
+        from src.laz_utils import get_epsg_authority_from_laz
         tile_id = self.input
         tile_gdf = self.tiles_aoi_gdf[self.tiles_aoi_gdf.tile_id == tile_id]
 
         ## Setup Paths
+        paths = self.config.paths
         s3_url = tile_gdf.URL.item()
         laz_basename = os.path.basename(s3_url)
         tif_basename = laz_basename.split(".")[0] + ".tif"
         logger.info(f"Downloading COPC: {laz_basename}")
-        chm_path = os.path.join(self.config.input.chm_dir, tif_basename)
-        stratified_path = os.path.join(self.config.input.stratified_dir, tif_basename)
-        samples_path = os.path.join(self.ch_dir, laz_basename.split('.')[0] + ".parquet")
+        chm_path = os.path.join(paths.prc.chm, tif_basename)
+        stratified_path = os.path.join(paths.prc.stratified, tif_basename)
+        samples_path = os.path.join(paths.training.ch_samples, laz_basename.split('.')[0] + ".parquet")
 
         ## Download LAZ COPC from AWS S3
-        laz_local_path = download_s3(s3_url , self.config.input.laz_dir)
+        laz_local_path = download_s3(s3_url , paths.raw.laz)
+        laz_epsg = get_epsg_authority_from_laz(laz_local_path)
 
         ## Configure Paths
         is_copc = is_copc_vlr_present(laz_local_path)
+        
         logger.info(f"Is COPC VLR {is_copc}")
 
         c1 = is_copc and os.path.exists(chm_path) == False
@@ -181,6 +220,8 @@ class DataFlow(FlowSpec):
                 res_m=self.config.data.res_m,
                 statistic=self.config.data.chm.statistic,
                 compute_hag=True,
+                polygon = tile_gdf.to_crs(laz_epsg).geometry.item().wkt,
+                max_height=self.config.data.filter.max_height
             )
 
         ## Compute Strata
@@ -199,7 +240,6 @@ class DataFlow(FlowSpec):
         c3 = not os.path.exists(samples_path) and os.path.exists(stratified_path)
         if c3:
             logger.info(f"Running Structurally Guided Sampling: {laz_basename}")
-            
             labels = dict(zip( list(range(len(self.config.data.sampling.height_strata))), self.config.data.sampling.strata_names ))
             bin_ids = list(range(1 , len(self.config.data.sampling.height_strata)+1))
             weights = dict(zip(bin_ids,bin_ids))
@@ -216,12 +256,6 @@ class DataFlow(FlowSpec):
             if strata_gdf is not None:
                 ## Filter Strata vector by area (reduce noise)
                 strata_gdf = strata_gdf[strata_gdf.area > self.config.data.sampling.min_area]
-
-                ## Get Intersection with water bodies and clip out if there is an intersection 
-                water_gdf = duckdb_get_intersection(strata_gdf, self.water_epsg, self.config.input.water_path)
-                if water_gdf is not None:
-                    strata_gdf = strata_gdf.overlay(water_gdf[['geometry']], how="difference")
-
                 # Generate Strateified Random Points, weighted by Strata
                 if len(strata_gdf) > 0:
                     point_samples_gdf = generate_stratified_random_points(
@@ -233,8 +267,8 @@ class DataFlow(FlowSpec):
                         out_vector_path = samples_path
                     )
                     point_samples_gdf["height"] = sample_raster_points(samples_path, chm_path)
-
                     point_samples_gdf = point_samples_gdf[(point_samples_gdf.height > self.config.data.filter.min_height) & (point_samples_gdf.height < self.config.data.filter.max_height)]
+                    point_samples_gdf = point_samples_gdf.to_crs(self.utm_crs)
                     if len(point_samples_gdf) > 0:
                         point_samples_gdf["tile_id"] = laz_basename.split('.')[0]
                         point_samples_gdf[self.config.data.sampling.id] = [uuid.uuid4().__str__() for i in range(len(point_samples_gdf))]
@@ -245,29 +279,29 @@ class DataFlow(FlowSpec):
 
     @step
     def join(self, inputs):
-        
+        # from src.duckdb_utils import merge_parquets_to_gdf
         ## Concatenate all sampled height data into a single GeoDataFrame
-        # self.training_data = pd.concat([gpd.read_parquet(i.samples_path) for i in inputs if i.samples_path is not None])
         ## Merge Artifacts
-        self.merge_artifacts(inputs, exclude= ["samples_path"])
+        paths = self.config.paths
+        self.merge_artifacts(inputs, exclude= ["samples_path", "get_lidar_data_failed"])
         import duckdb
         con = duckdb.connect()
         con.sql("INSTALL spatial; LOAD spatial")
-        con.sql(f"CREATE TABLE sample_points AS SELECT *,ST_AsText(geometry) AS wkt FROM read_parquet('{self.ch_dir}/*.parquet')")
+        con.sql(f"CREATE TABLE sample_points AS SELECT *,ST_AsText(geometry) AS wkt FROM read_parquet('{paths.training.ch_samples}/*.parquet')")
         df = con.sql("SELECT * FROM sample_points").to_df()
         # Create a GeoDataFrame from the DataFrame, converting the WKT column to a geometry column
-        self.training_data = gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df['wkt']), crs=self.config.project.epsg).drop(columns = 'wkt')
-    
+        self.training_data = gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df['wkt']), crs=self.utm_crs).drop(columns = 'wkt')
+        # self.training_data = merge_parquets_to_gdf(in_dir = paths.training.ch_samples, crs = self.utm_crs, out_path = paths.training.training_data)
         ## Write Training Data to ParQuet
-        self.training_data.to_parquet(self.training_data_path)
+        self.training_data.to_parquet(paths.training.training_data)
         
         self.next(self.construct_spatial_kfold)
 
     
     @step
     def construct_spatial_kfold(self):
-        
-        if not os.path.exists(self.blocks_path):
+        paths = self.config.paths
+        if not os.path.exists(paths.training.blocks):
           
             ## Run Spatial K fold with Kmeans  
             self.blocks_gdf = spatial_blocks(
@@ -280,13 +314,13 @@ class DataFlow(FlowSpec):
                 grid_type = self.config.data.sampling.grid_type,  
                 random_state = self.config.data.sampling.random_state
             )
-            self.blocks_gdf = self.blocks_gdf.set_crs(self.config.project.epsg, allow_override = True)
-            self.blocks_gdf.to_parquet(self.blocks_path)
+            self.blocks_gdf = self.blocks_gdf.set_crs(self.utm_crs, allow_override = True)
+            self.blocks_gdf.to_parquet(paths.training.blocks)
         else:
-            self.blocks_gdf = gpd.read_parquet(self.blocks_path)
+            self.blocks_gdf = gpd.read_parquet(paths.training.blocks)
 
         self.training_data = gpd.overlay(self.training_data, self.blocks_gdf.to_crs(self.training_data.crs))
-        self.training_data.to_parquet(self.training_data_path)
+        self.training_data.to_parquet(self.config.paths.training.training_data)
     
         self.next(self.init_gee)
 
@@ -298,8 +332,7 @@ class DataFlow(FlowSpec):
      
         ## Authenticate GEE
         auth_gee_from_env()
-        
-
+    
         ## Get Satelite Embeddings Image
         embeddings_col = ee.ImageCollection("GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL")
         ## Configure Query Geometry
@@ -313,10 +346,6 @@ class DataFlow(FlowSpec):
         
         ## Get Emebeddings image from Target Year
         embeddings_image = embeddings_col.filterDate(year1, year2).filterBounds(bbox_ee).first()
-        embeddings_image = embeddings_image.reproject( ## Reproject Image to UTM CRS
-            crs = self.config.project.epsg,
-            scale = self.config.data.res_m
-        )
 
         ## Pass Embeddings Images to Metaflow object
         self.embeddings_image = embeddings_image
@@ -326,12 +355,12 @@ class DataFlow(FlowSpec):
 
     @step
     def extract_gee_embeddings(self):
-        import ee
         from src.ee_utils import gdf_points_to_ee, auth_gee_from_env
         import geemap
         import pandas as pd
 
-        embeddings_csv_path = os.path.join(self.embeddings_dir, f"embeddings_k{self.input}.csv")
+        paths = self.config.paths
+        embeddings_csv_path = os.path.join(paths.training.embedding_samples, f"embeddings_k{self.input}.csv")
         embeddings_parquet_path = embeddings_csv_path.replace('.csv','.parquet')
 
         if not os.path.exists(embeddings_parquet_path):
@@ -371,9 +400,9 @@ class DataFlow(FlowSpec):
         ## Read Emebeddings CSV File
         import duckdb
         con = duckdb.connect()
-        embeddings_df= con.sql(f"SELECT * FROM read_parquet('{self.embeddings_dir}/*.parquet')").to_df()
+        embeddings_df = con.sql(f"SELECT * FROM read_parquet('{self.config.paths.training.embedding_samples}/*.parquet')").to_df()
         self.training_data = self.training_data.set_index('id').join(embeddings_df.set_index('id')).reset_index()
-        self.training_data.to_parquet(self.training_data_path)
+        self.training_data.to_parquet(self.config.paths.training.training_data)
         self.next(self.end)
 
 
@@ -386,57 +415,3 @@ class DataFlow(FlowSpec):
 
 if __name__ == '__main__':
     DataFlow()
-
-     # ## PDAL Pipeline - Compute HAG and write locally
-                # logger.info(f"Computing Height Above Ground: {laz_basename}")
-                # stages = [
-                #     reader("copc", laz_local_path),
-                #     filter_pdal("smrf", None),
-                #     filter_pdal("hag_nn"),
-                #     filter_pdal("ferry", kwargs= {"dimensions": "HeightAboveGround=>Z"}),
-                #     writer("copc", hag_path)
-                # ]
-
-                # pipeline = build_pipeline(stages)
-                # pipeline.execute()
-                # os.remove(laz_local_path)
-
-## Get Canopy Height from 95th Percentile
-        # if os.path.exists(hag_local_path):
-            
-        #     sample_points_gdf = gpd.read_parquet(self.sample_points_path)
-        #     bbox = tile_gdf.to_crs(sample_points_gdf.crs).total_bounds        
-        #     points_gdf = sample_points_gdf[['id', 'geometry']].sjoin(tile_gdf[['geometry']].to_crs(sample_points_gdf.crs), how = 'inner').drop(columns = "index_right")
-        #     del sample_points_gdf
-
-
-        #     point_coords = points_gdf.get_coordinates().values.T.reshape(2,-1)
-        #     xs1,ys1,xs2,ys2 = get_pixel_bounds_from_points(point_coords, bbox, self.config.data.res_m)
-        #     bounds_gdf = gpd.GeoDataFrame(points_gdf, geometry=[box(*coords) for coords in zip(xs1, ys1, xs2, ys2)], crs = self.config.project.epsg)
-        #     logger.info(f"Extracting Height at 95th Percentile: {laz_basename}")
-        #     height_data = []
-        #     for idx, row in bounds_gdf.iterrows():
-        #         c = row.geometry.bounds
-        #         bounds = f"([{c[0]}, {c[2]}], [{c[1]}, {c[3]}])"
-        #         pc_df = query_point_cloud(laz_local_path, bounds)
-                
-        #         if pc_df.empty:
-        #             logger.warning("No points in bounds; skipping tile")
-        #             continue
-        #         else:
-        #             heights = pc_df.Z.values
-        #             height_p95 = np.percentile(heights, q = 95)
-        #             height_data.append({
-        #                             "id": row["id"], 
-        #                             "height_p95": height_p95
-        #                             })
-
-
-        #     if len(height_data) > 0:
-        #         ## Export Canopy Height Data
-        #         heights_df = pd.DataFrame(height_data)
-                
-        #         heights_df.to_parquet(samples_path)
-        #         self.samples_path = samples_path
-        #     else:
-        #         self.samples_path = None
