@@ -53,14 +53,14 @@ paths:
     water_bodies: ${paths.project.root}/water.parquet
   ## Raw Data Inputs
   raw:
-    root: ${paths.project.root}/raw
+    root: ${paths.project.root}
     laz: ${paths.raw.root}/laz
-    embeddings: ${paths.raw.root}/embeddings
+    embeddings: ${paths.raw.root}/embedding_images
   # Processed intermediate data (regenerable)
   prc:
-    root: ${paths.project.root}/prc
+    root: ${paths.project.root}
     chm:  ${paths.prc.root}/chm
-    stratified: ${paths.prc.root}/stratified
+    stratified: ${paths.prc.root}/chm_stratified
   training:
     root: ${paths.project.root}/training
     data:  ${paths.training.root}/data

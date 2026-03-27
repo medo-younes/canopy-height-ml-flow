@@ -22,7 +22,7 @@ class CanopyHeightInferenceFlow(FlowSpec):
     '''
     
     Example:
-    python flows/inference.py run --max-workers 8 --max-num-splits 4000 --test true --model-checkpoint ElasticNet_RMSE_3.94_1774094444055350.pkl
+    python flows/inference.py run --max-workers 8 --max-num-splits 8000 --model-checkpoint ElasticNet_RMSE_3.94_1774094444055350.pkl
     '''
     
     config_path = Parameter(

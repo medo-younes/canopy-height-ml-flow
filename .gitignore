@@ -13,3 +13,4 @@ training
 *.parquet
 embeddings
 *.tif
+projects

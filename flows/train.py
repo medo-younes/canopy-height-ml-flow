@@ -22,7 +22,7 @@ class TrainFlow(FlowSpec):
     '''
     
     Example:
-    python flows/train.py run --max-workers 3 --max-num-splits 4000
+    python flows/train.py run --max-workers 3 --max-num-splits 4000 --test true
     '''
     
     config_path = Parameter(
@@ -93,7 +93,7 @@ class TrainFlow(FlowSpec):
             training_gdf = training_gdf.overlay(exclude_gdf.to_crs(training_gdf.crs), how='difference')
             logger.info(f"Excluding Noisy Data > Dataset size: {len(training_gdf)}")
         if self.test:
-            training_gdf = pd.concat([fold_data.sample(55) for idx, fold_data in training_gdf.groupby(['folds','strata'])]).reset_index()
+            training_gdf = pd.concat([fold_data.sample(50, replace= True) for idx, fold_data in training_gdf.groupby(['folds','strata'])]).reset_index()
 
 
         # ## Prepare Training Data
@@ -231,7 +231,7 @@ class TrainFlow(FlowSpec):
 
         ## Export Pretrained Model
         # Save the model to a file
-        best_model_path = os.path.join(self.config.paths.outputs.models, f'{best_model_name}_{self.config.project.criterion}_{mean_score:.2f}_{current.run_id}.pkl')
+        best_model_path = os.path.join(self.config.paths.models.root, f'{best_model_name}_{self.config.project.criterion}_{mean_score:.2f}_{current.run_id}.pkl')
         with open(best_model_path, 'wb') as f:
             pickle.dump(model, f)
         

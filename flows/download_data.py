@@ -32,7 +32,7 @@ class DataFlow(FlowSpec):
     7. Extract Tree Height Data using 10 x 10 grid cell with UTM CRS transform
     
     Example:
-    python flows/data_flow.py run --max-workers 3 --max-num-splits 4000 --test true
+    python flows/download_data.py run --max-workers 3 --max-num-splits 4000 --test true
     '''
     
     config_path = Parameter(
@@ -279,21 +279,20 @@ class DataFlow(FlowSpec):
 
     @step
     def join(self, inputs):
-        # from src.duckdb_utils import merge_parquets_to_gdf
-        ## Concatenate all sampled height data into a single GeoDataFrame
+        from src.duckdb_utils import merge_parquets_to_gdf
         ## Merge Artifacts
+        self.merge_artifacts(inputs, exclude= ["samples_path",
+                                                "get_lidar_data_failed",
+                                                "_catch_exception"])
+        
         paths = self.config.paths
-        self.merge_artifacts(inputs, exclude= ["samples_path", "get_lidar_data_failed"])
-        import duckdb
-        con = duckdb.connect()
-        con.sql("INSTALL spatial; LOAD spatial")
-        con.sql(f"CREATE TABLE sample_points AS SELECT *,ST_AsText(geometry) AS wkt FROM read_parquet('{paths.training.ch_samples}/*.parquet')")
-        df = con.sql("SELECT * FROM sample_points").to_df()
-        # Create a GeoDataFrame from the DataFrame, converting the WKT column to a geometry column
-        self.training_data = gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df['wkt']), crs=self.utm_crs).drop(columns = 'wkt')
-        # self.training_data = merge_parquets_to_gdf(in_dir = paths.training.ch_samples, crs = self.utm_crs, out_path = paths.training.training_data)
-        ## Write Training Data to ParQuet
-        self.training_data.to_parquet(paths.training.training_data)
+        ## Merge Training Data GeoParquets into single GeoDataFrame and write to file
+        self.training_data = merge_parquets_to_gdf(
+            in_dir = paths.training.ch_samples, 
+            crs = self.utm_crs,
+            out_path = paths.training.training_data
+        )
+  
         
         self.next(self.construct_spatial_kfold)
 
@@ -301,23 +300,22 @@ class DataFlow(FlowSpec):
     @step
     def construct_spatial_kfold(self):
         paths = self.config.paths
-        if not os.path.exists(paths.training.blocks):
+
           
-            ## Run Spatial K fold with Kmeans  
-            self.blocks_gdf = spatial_blocks(
-                gdf = self.training_data, 
-                nfolds = self.config.data.sampling.k,
-                width = self.config.data.sampling.width, 
-                height = self.config.data.sampling.height, 
-                method = self.config.data.sampling.method, 
-                orientation = self.config.data.sampling.orientation, 
-                grid_type = self.config.data.sampling.grid_type,  
-                random_state = self.config.data.sampling.random_state
-            )
-            self.blocks_gdf = self.blocks_gdf.set_crs(self.utm_crs, allow_override = True)
-            self.blocks_gdf.to_parquet(paths.training.blocks)
-        else:
-            self.blocks_gdf = gpd.read_parquet(paths.training.blocks)
+        ## Run Spatial K fold with Kmeans  
+        self.blocks_gdf = spatial_blocks(
+            gdf = self.training_data, 
+            nfolds = self.config.data.sampling.k,
+            width = self.config.data.sampling.width, 
+            height = self.config.data.sampling.height, 
+            method = self.config.data.sampling.method, 
+            orientation = self.config.data.sampling.orientation, 
+            grid_type = self.config.data.sampling.grid_type,  
+            random_state = self.config.data.sampling.random_state
+        )
+        self.blocks_gdf = self.blocks_gdf.set_crs(self.utm_crs, allow_override = True)
+        self.blocks_gdf.to_parquet(paths.training.blocks)
+
 
         self.training_data = gpd.overlay(self.training_data, self.blocks_gdf.to_crs(self.training_data.crs))
         self.training_data.to_parquet(self.config.paths.training.training_data)
@@ -363,34 +361,33 @@ class DataFlow(FlowSpec):
         embeddings_csv_path = os.path.join(paths.training.embedding_samples, f"embeddings_k{self.input}.csv")
         embeddings_parquet_path = embeddings_csv_path.replace('.csv','.parquet')
 
-        if not os.path.exists(embeddings_parquet_path):
-            ## Authenticate GEE
-            auth_gee_from_env()
-            
+        ## Authenticate GEE
+        auth_gee_from_env()
+        
 
-            k_point_samples = self.training_data[self.training_data.folds == self.input].to_crs(4326)
-            ## Upload point samples to GEE
-            logger.info("Uploading sample points to GEE")
-            point_samples_ee = gdf_points_to_ee(
-                gdf= k_point_samples,
-                id_col = self.config.data.sampling.id
-            )
+        k_point_samples = self.training_data[self.training_data.folds == self.input].to_crs(4326)
+        ## Upload point samples to GEE
+        logger.info("Uploading sample points to GEE")
+        point_samples_ee = gdf_points_to_ee(
+            gdf= k_point_samples,
+            id_col = self.config.data.sampling.id
+        )
 
-            ## Sample Emebdddings from points
-            logger.info(f"Sampling GEE Satellite Embeddings with {len(k_point_samples)} Points")
-            sampled_data =  self.embeddings_image.sampleRegions(
-                collection = point_samples_ee,
-                scale = self.config.data.res_m
-            )
+        ## Sample Emebdddings from points
+        logger.info(f"Sampling GEE Satellite Embeddings with {len(k_point_samples)} Points")
+        sampled_data =  self.embeddings_image.sampleRegions(
+            collection = point_samples_ee,
+            scale = self.config.data.res_m
+        )
 
-            logger.info(f"Exporting Sampled Embeddings")
+        logger.info(f"Exporting Sampled Embeddings")
 
-            ## Export Embeddings to CSV File
-            geemap.ee_to_csv(sampled_data, embeddings_csv_path)
+        ## Export Embeddings to CSV File
+        geemap.ee_to_csv(sampled_data, embeddings_csv_path)
 
-            embeddings_df = pd.read_csv(embeddings_csv_path)
-            embeddings_df.to_parquet(embeddings_parquet_path)
-            os.remove(embeddings_csv_path)
+        embeddings_df = pd.read_csv(embeddings_csv_path)
+        embeddings_df.to_parquet(embeddings_parquet_path)
+        os.remove(embeddings_csv_path)
         self.next(self.merge_training_data)
 
     @step
