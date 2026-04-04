@@ -70,6 +70,7 @@ class TrainFlow(FlowSpec):
     def read_data(self):
         from src.geo_utils import read_canopy_height_data
         from src.data import get_stats
+        from src.sampling import remove_height_outliers
         import numpy as np
         import geopandas as gpd
         import pandas as pd
@@ -81,20 +82,13 @@ class TrainFlow(FlowSpec):
             max_height= self.config.data.filter.max_height,
         )
 
-        ## Exclude Noise
-        exclude_path = "projects/Gros Morne National Park of Canada/exclude.txt"
 
-        logger.info(f"Dataset size: {len(training_gdf)}")
-        if os.path.exists(exclude_path):
-            tiles_aoi_gdf = gpd.read_parquet(self.config.paths.project.tiles_aoi)
-            exclude_df = pd.read_csv(exclude_path)
-            exclude_df= pd.merge(exclude_df, tiles_aoi_gdf, left_on='tile_name', right_on="Tile_name")
-            exclude_gdf = gpd.GeoDataFrame(exclude_df, geometry='geometry', crs = tiles_aoi_gdf.crs)
-            training_gdf = training_gdf.overlay(exclude_gdf.to_crs(training_gdf.crs), how='difference')
-            logger.info(f"Excluding Noisy Data > Dataset size: {len(training_gdf)}")
+        ## Subsample 50 points from each strata / fold for testing
         if self.test:
             training_gdf = pd.concat([fold_data.sample(50, replace= True) for idx, fold_data in training_gdf.groupby(['folds','strata'])]).reset_index()
 
+        logger.info(f"Dataset size: {len(training_gdf)}")
+       
 
         # ## Prepare Training Data
         self.X  = training_gdf.loc[:, self.X_cols].values ## Independent Variables: Satelite Embeddings 

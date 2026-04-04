@@ -5,7 +5,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from metaflow import FlowSpec, step, Config, catch, Parameter, current
+from metaflow import FlowSpec, step, Config, catch, Parameter, current, project
 import os
 from src import *
 from src.pdal_ops import *
@@ -20,6 +20,7 @@ import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
+@project(name = "data_flow")
 class DataFlow(FlowSpec):
     '''
     Canopy Height Estimation with Google Earth Embeddings (GEE) Dataset Preparation Flow
@@ -74,17 +75,10 @@ class DataFlow(FlowSpec):
         print(self.config.paths.project.root)
         ## Setup output Directory
         project_id = str(self.cache_run_id) if self.cache_run_id is not None else str(current.run_id) 
-        self.out_dir = os.path.join(self.config.paths.training.data, project_id)
-        
-
  
         # Create all project directories
         create_project_dirs(self.config)
-        os.makedirs(self.out_dir, exist_ok=True)
-
-    
-    
-        logger.info(f"Output Directory: {self.out_dir}")
+      
         self.next(self.get_aoi_and_tiles)
 
 
@@ -203,7 +197,7 @@ class DataFlow(FlowSpec):
 
         ## Download LAZ COPC from AWS S3
         laz_local_path = download_s3(s3_url , paths.raw.laz)
-        laz_epsg = get_epsg_authority_from_laz(laz_local_path)
+        # laz_epsg = get_epsg_authority_from_laz(laz_local_path)
 
         ## Configure Paths
         is_copc = is_copc_vlr_present(laz_local_path)
@@ -220,7 +214,7 @@ class DataFlow(FlowSpec):
                 res_m=self.config.data.res_m,
                 statistic=self.config.data.chm.statistic,
                 compute_hag=True,
-                polygon = tile_gdf.to_crs(laz_epsg).geometry.item().wkt,
+                # polygon = tile_gdf.to_crs(laz_epsg).geometry.item().wkt,
                 max_height=self.config.data.filter.max_height
             )
 
@@ -392,13 +386,23 @@ class DataFlow(FlowSpec):
 
     @step
     def merge_training_data(self, inputs):
-        
+        from src.sampling import remove_height_outliers
         self.merge_artifacts(inputs)
         ## Read Emebeddings CSV File
         import duckdb
         con = duckdb.connect()
         embeddings_df = con.sql(f"SELECT * FROM read_parquet('{self.config.paths.training.embedding_samples}/*.parquet')").to_df()
         self.training_data = self.training_data.set_index('id').join(embeddings_df.set_index('id')).reset_index()
+
+         ## Remove outliers
+        n = len(self.training_data )
+        self.training_data  = remove_height_outliers(
+            df = self.training_data,
+            z_threshold=2.5
+        )
+        logger.info(f"Outliers Removed: {n - len(self.training_data )}")
+
+        logger.info("Exporting Training Data")
         self.training_data.to_parquet(self.config.paths.training.training_data)
         self.next(self.end)
 
