@@ -4,24 +4,25 @@
 
 End-to-end metaflow pipeline for estimating tree canopy height across large areas [Google AlphaEarth Satellite Embeddings](https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_SATELLITE_EMBEDDING_V1_ANNUAL) using airborne LiDAR Point Clouds as ground-truth.
 
-This project consists of three metaflow pipelines for preparing 10m tree canopy height maps:
+### Three Flows for Generating Custom Canopy Height Maps
 1. [**Data Download**](flows/download_data.py) - downloading LiDAR point clouds from AWS S3 ([learn more](#lidar-data)), compute CHM, structurally guided sampling of tree canopy height. Sampling GEE satellite embeddings 
 2. [**Training**](flows/train.py) - regression model training (Elastic Net, Random Forest and XGBoost) with Spatial K-fold Cross Validation. Automated model selection.
 3. [**Inference**](flows/inference.py) - predict tree canopy height across your AOI using best model checkpoint. 
 
 
 
-
-
 ## Getting Started with Conda
 
 **Prerequisites:**
--  [Anaconda or Miniconda](https://www.docker.com/products/docker-desktop/)
-- AWS CLI
-- GEE Service Account
+- Conda installation [[instructions here]](https://www.anaconda.com/download)
+- AWS Account with AWS CLI installed and configured [[instructions here](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)]
+- GEE Service Account [[instructions here]](#setting-up-gee-api-access)
 
 ```bash
+# Clone repository
 git clone https://github.com/medo-younes/canopy-height-ml-flow.git
+
+## Create and Activate Conda Environment
 conda env create -f environment.yaml
 conda activate canopy-flow
 
@@ -38,13 +39,14 @@ python flows/inference.py run --max-workers 8 --max-num-splits 8000 --model-chec
 ## Getting Started with Docker
 
 **Prerequisites:**
--  [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-- AWS CLI
-- GEE Service Account
+- Docker Desktop [[instructions here](https://www.docker.com/products/docker-desktop/)]
+- AWS Account with AWS CLI installed and configured [[instructions here](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)]
+- GEE Service Account [[instructions here]](#setting-up-gee-api-access)
 
 ```bash
 # Build the docker image
 docker build -t canopy-flow .
+
 # Export AWS Credentials to environment
 eval "$(aws configure export-credentials --profile default --format env)"
 
@@ -72,7 +74,7 @@ docker run -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
 
 ## Setting Up GEE API Access
 
-1. Export a GEE Service Account Key JSON file by [following these instructions.](https://gee-documentation.readthedocs.io/en/latest/authentication/service-account-auth.html).
+1. Export a GEE Service Account Key JSON file by [following these instructions](https://gee-documentation.readthedocs.io/en/latest/authentication/service-account-auth.html).
 2. Create an .env file in the project root directory and include your GEE service account email and the path to your GEE Service Account Key (JSON)
 
 ```bash
