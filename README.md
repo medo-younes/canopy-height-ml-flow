@@ -1,11 +1,6 @@
-# CanopyFlow: ML-driven Tree Canopy Height Estimation Pipeline
+# 🌲CanopyFlow🌲
+# ML-driven Tree Canopy Height Estimation Pipeline
 
-
-TODO:
-- Running with Docker
-- wood buffalo case study
-- Instructions for setting up config.yaml for target aoi
-- passing AOI path as argument in data download flow
 
 End-to-end metaflow pipeline for estimating tree canopy height across large areas [Google AlphaEarth Satellite Embeddings](https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_SATELLITE_EMBEDDING_V1_ANNUAL) using airborne LiDAR Point Clouds as ground-truth.
 
