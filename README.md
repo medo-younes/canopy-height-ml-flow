@@ -1,5 +1,5 @@
 # 🌲CanopyFlow🌲
-# ML-driven Tree Canopy Height Estimation Pipeline
+### ML-driven Tree Canopy Height Estimation Pipeline
 
 
 End-to-end metaflow pipeline for estimating tree canopy height across large areas [Google AlphaEarth Satellite Embeddings](https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_SATELLITE_EMBEDDING_V1_ANNUAL) using airborne LiDAR Point Clouds as ground-truth.
