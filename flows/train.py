@@ -23,6 +23,11 @@ class TrainFlow(FlowSpec):
     
     Example:
     python flows/train.py run --max-workers 3 --max-num-splits 4000 --test true
+
+    docker run -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+           -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+           -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \e
+            myounes88/canopy-flow:test python train.py run --max-workers 3 --max-num-splits 4000 --experiment-id a19fc055-f5d-4941-a29c-c76e68ba9238
     '''
     
     config_path = Parameter(
@@ -30,11 +35,16 @@ class TrainFlow(FlowSpec):
         help = "Path to config YAML for configuring metaflow pipeline.",
         default = "config.yaml"
     )
-    dataset_id = Parameter(
-        "dataset-id",
-        help = "Required run id for training dataset",
-        default = "test",
-        required = True
+    s3_bucket = Parameter(
+        "s3-bucket",
+        help = "S3 URI to root directory hosting lidar metadata (tiles and site boundaries)",
+        default = "canopy-flow-data",
+        required = False
+    )
+    experiment_id = Parameter(
+        "experiment-id",
+        help = "Required experiment id for training dataset",
+        required = False
     )
     test = Parameter(
         "test",
@@ -48,21 +58,40 @@ class TrainFlow(FlowSpec):
 
     @step
     def start(self):
-      
+        from src.s3_utils import get_latest_experiment_id
         ## Setup output Directory
-        project_id = str(current.run_id)
-        self.training_outputs_path = os.path.join(self.config.paths.training.outputs, project_id)
-        self.training_data_path = self.config.paths.training.training_data
+        run_id = str(current.run_id)
         
+        
+        
+        # Get the object from S3
+        if self.experiment_id is None:
+            experiment_id = get_latest_experiment_id(
+                    bucket_name = 'canopy-flow-data',
+                    file_key = os.path.join('projects', self.config.project.aoi_name, 'latest.txt')
+                    )
+        else:
+            experiment_id = self.experiment_id
+        
+        logger.info(f"Experiment ID: {experiment_id}")
+        self.project_dir = os.path.join('projects', self.config.project.aoi_name)
+        self.experiment_dir = os.path.join(self.project_dir, 'experiments', experiment_id)
+        self.dataset_path = "s3://" + os.path.join(self.s3_bucket, self.experiment_dir, self.config.paths.experiments.dataset)
+        self.results_path = os.path.join(self.experiment_dir, "results.parquet")
+        self.box_plot_path =  os.path.join(self.experiment_dir, "boxplot_comparison.png")
+        self.regression_plot_path =  os.path.join(self.experiment_dir, "regression_plot.png")
+        self.upload_files = [self.results_path, self.box_plot_path, self.regression_plot_path]
+
         ## Create Dirs
-        os.makedirs(self.training_outputs_path, exist_ok=True)
-        
-    
+        os.makedirs(self.experiment_dir, exist_ok=True)
+
+
         ## Setup 
         self.n_jobs = os.cpu_count() - 4
         self.X_cols = [f"A{str(i).zfill(2)}" for i in range(64)]
         self.y_col = 'height'
         self.run_models = self.config.project.run_models
+        
         self.next(self.read_data)
 
 
@@ -74,10 +103,14 @@ class TrainFlow(FlowSpec):
         import numpy as np
         import geopandas as gpd
         import pandas as pd
+        from src.s3_utils import download_s3
 
+
+        logger.info(f"Dataset Path: {self.dataset_path}")
+        local_dataset_path= download_s3(self.dataset_path, self.experiment_dir)
         ## Read Training Data GeoParquet using DuckDB
         training_gdf = read_canopy_height_data(
-            vector_path=self.training_data_path,
+            vector_path = local_dataset_path,
             min_height = self.config.data.filter.min_height ,
             max_height= self.config.data.filter.max_height,
         )
@@ -96,7 +129,7 @@ class TrainFlow(FlowSpec):
         self.folds, self.n_folds = training_gdf.folds.values, np.unique(training_gdf.folds.values)
 
         # Example usage
-        get_stats(training_gdf, 'height', os.path.join(self.training_outputs_path, "height_stats.csv"))     
+        get_stats(training_gdf, 'height', os.path.join(self.experiment_dir, "height_stats.csv"))     
         self.training_gdf = training_gdf
         self.next(self.dataset_eda)
 
@@ -118,7 +151,7 @@ class TrainFlow(FlowSpec):
         import pandas as pd
 
         model_name = self.input
-        model_outputs_path = os.path.join(self.training_outputs_path, f"{model_name}_results.parquet")
+        model_outputs_path = os.path.join(self.experiment_dir, f"{model_name}_results.parquet")
 
         ## Initialize Model Class
         model = init_model(model_name, random_state=self.config.project.seed)
@@ -131,10 +164,10 @@ class TrainFlow(FlowSpec):
             estimator = model,
             param_distributions = param_distributions,
             cv = PredefinedSplit(test_fold=self.folds),
-            scoring = self.config.training.scoring,
-            n_trials = self.config.training.n_trials,
+            scoring = self.config.experiment.scoring,
+            n_trials = self.config.experiment.n_trials,
             n_jobs = self.n_jobs,
-            verbose = self.config.training.verbose,
+            verbose = self.config.experiment.verbose,
             refit = True,
             random_state = self.config.project.seed,
             
@@ -155,7 +188,6 @@ class TrainFlow(FlowSpec):
         )
 
         self.results_df.to_parquet(model_outputs_path)
-        
         self.next(self.combine_cv_results)
 
 
@@ -171,7 +203,8 @@ class TrainFlow(FlowSpec):
         self.merge_artifacts(inputs, 
                              exclude = ['optuna_cv', 'results_df', 'optuna_cv_list'])
         
-        self.results_df.to_parquet(os.path.join(self.training_outputs_path, "results.parquet"))
+        
+        self.results_df.to_parquet(self.results_path)
         self.next(self.create_plots)
 
     @step
@@ -180,12 +213,16 @@ class TrainFlow(FlowSpec):
         from sklearn.ensemble import RandomForestRegressor
         from sklearn.linear_model import ElasticNet
         from xgboost import XGBRegressor
+        
         ## KFold Box Plot
+        
         plot_model_comparison_boxplots(
             self.results_df, 
              score_names = ["R2", "RMSE", "MAE"],
             models = ['EN','RF','XG'],
-            out_path = os.path.join(self.training_outputs_path, "boxplot_comparison.png"))
+            out_path = self.box_plot_path
+            
+            )
         
         ## Regresiion Scatter Plot
         model_names = ['ElasticNet', 'RandomForest', 'XGBoost']
@@ -204,9 +241,8 @@ class TrainFlow(FlowSpec):
             lim=(0, self.training_gdf.height.max()+2),
             xlabel="LiDAR Canopy Height (m)",
             ylabel="Predicted Canopy Height (m)",
-            out_path = os.path.join(self.training_outputs_path,"regression_plot.png")
+            out_path = self.regression_plot_path
         )
-
         self.next(self.select_best_model)
 
     @step
@@ -225,11 +261,33 @@ class TrainFlow(FlowSpec):
 
         ## Export Pretrained Model
         # Save the model to a file
-        best_model_path = os.path.join(self.config.paths.models.root, f'{best_model_name}_{self.config.project.criterion}_{mean_score:.2f}_{current.run_id}.pkl')
-        with open(best_model_path, 'wb') as f:
+        self.best_model_path = os.path.join(self.experiment_dir, f'{best_model_name}_{self.config.project.criterion}_{mean_score:.2f}.pkl')
+        with open(self.best_model_path, 'wb') as f:
             pickle.dump(model, f)
         
+        self.upload_files.append(self.best_model_path)
+        self.next(self.upload_results_to_s3)
+
+    @step
+    def upload_results_to_s3(self):
+
+        from src.s3_utils import upload_files_to_s3
+
+        ## Write Latest ID to file
+        model_path = os.path.join(self.config.paths.project.root, "model.txt")
+        open(model_path, 'w').write(self.best_model_path)
+
+        ## Upload files to S3 bucket
+        upload_files_to_s3(
+            bucket_name=self.s3_bucket,
+            file_paths=self.upload_files,   
+        )
+        logger.info(f"Files uploaded to AWS S3 Bucket: {self.s3_bucket}")
+
+        
         self.next(self.end)
+
+
     @step
     def end(self):
         logger.info("Complete")

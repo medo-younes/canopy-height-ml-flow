@@ -112,17 +112,14 @@ def duckdb_get_intersection(gdf, in_epsg, intersect_vector_path):
 
 
 def read_canopy_height_data(vector_path, min_height, max_height):
-    import duckdb
-
-    con = duckdb.connect()
-    con.sql("INSTALL spatial; LOAD spatial")
-
-    con.sql(f"CREATE TABLE sample_points AS SELECT *,ST_AsText(geometry) AS wkt FROM read_parquet('{vector_path}')")
-    df = con.sql(f"SELECT * FROM sample_points WHERE height > {min_height} AND height <= {max_height}").to_df()
-
-    epsg = get_crs_epsg_from_parquet(vector_path)
-    # Create a GeoDataFrame from the DataFrame, converting the WKT column to a geometry column
-    return gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df['wkt']), crs=epsg).drop(columns = 'wkt')
+    # Read the parquet file directly with geopandas
+    gdf = gpd.read_parquet(vector_path)
+    
+    # Filter by height values
+    gdf = gdf[(gdf['height'] > min_height) & (gdf['height'] <= max_height)]
+    
+    # Remove rows with null geometries
+    return gdf.dropna()
 
 
 

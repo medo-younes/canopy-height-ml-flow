@@ -3,7 +3,6 @@
 
 TODO:
 - Running with Docker
-- Hosting can elevation parquet files on github or aws
 - wood buffalo case study
 - Instructions for setting up config.yaml for target aoi
 - passing AOI path as argument in data download flow
@@ -16,6 +15,66 @@ This project consists of three metaflow pipelines for preparing 10m tree canopy 
 3. [**Inference**](flows/inference.py) - predict tree canopy height across your AOI using best model checkpoint. 
 
 
+
+
+
+## Getting Started with Conda
+
+**Prerequisites:**
+-  [Anaconda or Miniconda](https://www.docker.com/products/docker-desktop/)
+- AWS CLI
+- GEE Service Account
+
+```bash
+git clone https://github.com/medo-younes/canopy-height-ml-flow.git
+conda env create -f environment.yaml
+conda activate canopy-flow
+
+## Dataset Construction
+python flows/construct_dataset.py run --max-workers 3 --max-num-splits 4000  --tile-index-path s3://canopy-flow-data/canelevation/tile_index.parquet --sites-path s3://canopy-flow-data/canelevation/sites.parquet --output_dir projects
+
+## Model Training - use metaflow Run ID from dataset preparation flow
+python flows/train.py run --max-workers 3 --max-num-splits 4000 --s3-bucket canopy-flow-data 
+
+## Inference - use path to best model checkpoint 
+python flows/inference.py run --max-workers 8 --max-num-splits 8000 --model-checkpoint <MODEL-CHECKPOINT-PATH>
+```
+
+## Getting Started with Docker
+
+**Prerequisites:**
+-  [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- AWS CLI
+- GEE Service Account
+
+```bash
+# Build the docker image
+docker build -t canopy-flow .
+# Export AWS Credentials to environment
+eval "$(aws configure export-credentials --profile default --format env)"
+
+# Dataset construction flow with Docker
+docker run -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+           -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+           -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \
+            myounes88/canopy-flow:test python construct_dataset.py run --max-workers 3 --max-num-splits 4000
+
+
+## Training Flow with Docker
+docker run -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+           -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+           -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \
+            myounes88/canopy-flow:test python train.py run --max-workers 3 --max-num-splits 4000 --experiment-id a19fc055-f5ed-4941-a29c-c76e68ba9238
+
+
+## Predict Canopy Height with Docker
+docker run -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+           -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+           -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \
+            myounes88/canopy-flow:test python inference.py run --max-workers 3 --max-num-splits 4000 --experiment-id a19fc055-f5ed-4941-a29c-c76e68ba9238
+```
+
+
 ## Setting Up GEE API Access
 
 1. Export a GEE Service Account Key JSON file by [following these instructions.](https://gee-documentation.readthedocs.io/en/latest/authentication/service-account-auth.html).
@@ -24,39 +83,6 @@ This project consists of three metaflow pipelines for preparing 10m tree canopy 
 ```bash
 GEE_SERVICE_ACCOUNT_EMAIL=<YOUR-GEE-SERVICE-ACCOUNT-EMAIL>
 GEE_SERVICE_ACCOUNT_KEY_PATH=<PATH-TO-YOUR-GEE-SERVICE-ACCOUNT-KEY>
-```
-
-
-## Run with Conda Environemnt
-```bash
-conda env create -f environment.yaml
-conda activate canopy-flow
-```
-
-## Run with Docker
-
-```bash
-# Export AWS Credentials to environment
-eval "$(aws configure export-credentials --profile default --format env)"
-
-# Run with docker image (myounes88/canopy-flow:test)
-docker run -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
-           -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
-           -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \
-            myounes88/canopy-flow:test python data.py run --max-workers 3 --max-num-splits 4000
-```
-
-## Running Flows
-
-```bash
-## Dataset Preparation
-python flows/download_data.py run --max-workers 3 --max-num-splits 4000 
-
-## Model Training - use metaflow Run ID from dataset preparation flow
-python flows/train.py run --max-workers 3 --max-num-splits 4000 
-
-## Inference - use path to best model checkpoint 
-python flows/inference.py run --max-workers 8 --max-num-splits 8000 --model-checkpoint <MODEL-CHECKPOINT-PATH>
 ```
 
 ## LiDAR Data

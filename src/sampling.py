@@ -54,4 +54,15 @@ def remove_height_outliers(df, z_threshold = 2.5):
     std = df.height.std()
     z = (df.height - mean) / std
     return df[(z > -z_threshold) & (z < z_threshold)]
+
+
+def stratified_sample(gdf, strata_cols, min_n = 10):
+    min_n = min((gdf.groupby(strata_cols).size().min(), min_n))
+    return gdf.groupby(strata_cols).apply(lambda group: group.sample(min_n))
+
+
+def construct_stratified_sample(gdf, strata_cols, min_n = 10, n_samples = 5000):
+    gdf = stratified_sample(gdf, strata_cols, min_n)
+    return gdf, int(n_samples / len(gdf))
+
     

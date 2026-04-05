@@ -108,33 +108,40 @@ def retrieve_tile_index(out_dir):
     os.remove(filename)
 
 
-# ## Download LAZ Files 
-# def pdal_download_s3(matching_urls, out_dir, wkt):
-#     ## Download Matching LAZ Files from NRCAN S3 Bucket
-#     pipeline_fp = os.path.join(out_dir ,'download.json')
-#     url1 = Path(matching_urls[0])
-#     print(f'DOWNLOADING FROM PATH: {url1.parent}')
-#     print('=============================================================')
-#     n = 1
-#     pipeline = list()
-#     for url in matching_urls:
-#         # print(url)
-#         url_path = Path(url)
-#         file_name = url.split('/')[-1].replace('.copc', '')
-#         out_fp = os.path.join(out_dir, file_name).replace('\\', '/')
+def upload_folder_to_s3(bucket_name, folder_path, s3_prefix=""):
+    s3_client = boto3.client('s3')
 
-#         # arcpy.AddMessage(out_fp)
-#         pipeline.extend([{"type" : "readers.las", "filename" : url}])
-        
-#     # pipeline.append({"type" : "filters.merge"})
-#     pipeline.append({"type" :"writers.las", "filename": out_fp})
+    # Walk through all directories and files
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            local_path = os.path.join(root, file)
 
-#     pipeline = dict(pipeline = pipeline)
-#     # print('DOWNLOADING NOW')
+            # Create the relative S3 key
+            relative_path = os.path.relpath(local_path, folder_path)
+            s3_key = os.path.join(s3_prefix, relative_path).replace("\\", "/")  # Ensure forward slashes
 
-#     with open(pipeline_fp, 'w') as f:
-#         json.dump(pipeline, f)
-#     # subprocess.run(['pdal', 'pipeline', pipeline_fp])
+            print(f"Uploading {local_path} to s3://{bucket_name}/{s3_key}")
+            s3_client.upload_file(local_path, bucket_name, s3_key)
 
-#     pipeline = pdal.Pipeline(json.dumps(pipeline))
-#     pipeline.execute()
+
+def upload_files_to_s3(bucket_name, file_paths, s3_prefix = ''):
+    s3_client = boto3.client('s3')
+
+    # Walk through all directories and files
+    for file_path in file_paths:
+
+        # Create the relative S3 key
+        relative_path = os.path.relpath(file_path)
+        s3_key = os.path.join(s3_prefix, relative_path).replace("\\", "/")  # Ensure forward slashes
+
+        print(f"Uploading {file_path} to s3://{bucket_name}/{s3_prefix}")
+        s3_client.upload_file(file_path, bucket_name, s3_key)
+
+
+def get_latest_experiment_id(bucket_name, file_key):
+    # Initialize S3 client
+    s3 = boto3.client('s3')
+    # Get the object from S3
+    response = s3.get_object(Bucket=bucket_name, Key=file_key)
+    # Read and decode the content
+    return response['Body'].read().decode('utf-8')

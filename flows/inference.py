@@ -5,7 +5,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from metaflow import FlowSpec, step, Config, resources, Parameter, current
+from metaflow import FlowSpec, step, Config, resources, Parameter, current, S3
 import os
 from src.parser import omega_parse
 import logging
@@ -22,7 +22,13 @@ class CanopyHeightInferenceFlow(FlowSpec):
     '''
     
     Example:
-    python flows/inference.py run --max-workers 8 --max-num-splits 8000 --model-checkpoint ElasticNet_RMSE_3.94_1774094444055350.pkl
+    python flows/inference.py run --max-workers 8 --max-num-splits 8000 --model-checkpoint --experiment-id a19fc055-f5d-4941-a29c-c76e68ba9238
+    eval "$(aws configure export-credentials --profile default --format env)"
+    docker run -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+           -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+           -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \
+            myounes88/canopy-flow:test python inference.py run --max-workers 8 --max-num-splits 8000 --experiment-id a19fc055-f5d-4941-a29c-c76e68ba9238 \
+            --model-checkpoint "s3://canopy-flow-data/projects/Jasper National Park of Canada/experiments/a19fc055-f5ed-4941-a29c-c76e68ba9238/ElasticNet_RMSE_3.61.pkl"
     '''
     
     config_path = Parameter(
@@ -30,10 +36,19 @@ class CanopyHeightInferenceFlow(FlowSpec):
         help = "Path to config YAML for configuring metaflow pipeline.",
         default = "config.yaml"
     )
-    model_checkpoint = Parameter(
+    s3_bucket = Parameter(
+        "s3-bucket",
+        help = "S3 URI to root directory hosting lidar metadata (tiles and site boundaries)",
+        default = "canopy-flow-data",
+        required = False
+    )
+    experiment_id = Parameter(
+        "experiment-id",
+        help = "Required experiment id for training dataset",
+        required = False
+    )
+    model_checkpoint_path = Parameter(
         "model-checkpoint",
-        help = "Path to pretrained regression model checkpoint",
-        default = "ElasticNet_RMSE_3.94_1774094444055350.pkl",
         required = True
     )
     test = Parameter(
@@ -48,6 +63,11 @@ class CanopyHeightInferenceFlow(FlowSpec):
         default = None,
         required = False
     )
+    sites_path = Parameter(
+        "sites-path",
+        default = "s3://canopy-flow-data/canelevation/sites.parquet",
+        required = False
+    )
     
     
     config = Config("config", default = "config.yaml", parser = omega_parse)
@@ -58,15 +78,26 @@ class CanopyHeightInferenceFlow(FlowSpec):
         ## Setup output Directory
         aoi_dir_name =  self.config.project.aoi_name
         self.embeddings_dir = self.config.paths.raw.embeddings
-        self.model_checkpoint_path = os.path.join(self.config.paths.models.root, self.model_checkpoint) ## TODO: Get Model from MLFLow registry
+        
+
+        experiment_id = self.experiment_id
+        self.project_dir = os.path.join('projects', self.config.project.aoi_name)
+        self.experiment_dir = os.path.join(self.project_dir, 'experiments', experiment_id)
+        self.s3_project_dir = "s3://" + os.path.join(self.s3_bucket, self.project_dir)
+
+        self.upload_files = []
+
+
         self.canopy_height_preds_dir = os.path.join(self.config.paths.predictions.root, str(current.run_id) if self.cache_run_id is None else self.cache_run_id)
         self.grid_path = os.path.join(self.canopy_height_preds_dir, 'grid.parquet')
         self.embeddings_vrt_path = os.path.join(self.embeddings_dir, f'embeddings_{aoi_dir_name}.vrt')
         self.canopy_heights_preds_vrt_path = os.path.join(self.canopy_height_preds_dir, f'canopy_height_{aoi_dir_name}.vrt')
+        self.canopy_heights_preds_cog_path = os.path.join(self.experiment_dir, f'canopy_height_{aoi_dir_name}.cog.tif')
+        self.aoi_path = os.path.join(self.s3_project_dir, 'aoi.parquet')
         ## Create Dirs
         os.makedirs(self.embeddings_dir, exist_ok=True)
         os.makedirs(self.canopy_height_preds_dir, exist_ok=True)
-
+        os.makedirs(self.experiment_dir)
         self.next(self.read_data)
 
 
@@ -77,7 +108,7 @@ class CanopyHeightInferenceFlow(FlowSpec):
         import geopandas as gpd
         logger.info(f"Fetching AOI for {self.config.project.aoi_name}")
         self.aoi_gdf = get_aoi(
-                    sites_path=self.config.data.get_aoi.sites_path,
+                    sites_path=self.sites_path,
                     name_col=self.config.data.get_aoi.name_col,
                     aoi_name=self.config.project.aoi_name
                     )
@@ -119,11 +150,15 @@ class CanopyHeightInferenceFlow(FlowSpec):
     @step
     def load_model(self):
         import pickle
+        from src.s3_utils import download_s3
         logger.info(f"Loading Regression Model from: {self.model_checkpoint_path}")
 
         ## Load Model using Pickle 
         # TODO: Load model from MLFlow Model Registry
-        with open(self.model_checkpoint_path, 'rb') as model_file:
+
+        model_checkpoint_path = download_s3(self.model_checkpoint_path, self.experiment_dir )
+        
+        with open(model_checkpoint_path, 'rb') as model_file:
             self.model = pickle.load(model_file)
 
         logger.info("Model Successfully Loaded")
@@ -195,7 +230,7 @@ class CanopyHeightInferenceFlow(FlowSpec):
         from osgeo import gdal
         from glob import glob
         from src.geo_utils import clip_raster_with_vector
-
+        from src.s3_utils import download_s3
         logger.info("Merging Artifacts")
         self.merge_artifacts(inputs,
                              exclude = ["grid_ids", 
@@ -214,17 +249,47 @@ class CanopyHeightInferenceFlow(FlowSpec):
             srcDSOrSrcDSTab=ch_pred_paths
         )
 
-        # vrt_embeddings = None
+        aoi_path = download_s3(self.aoi_path, self.experiment_dir)
         vrt_ch = None
 
         ## Clip VRT To AOI Polygon
         logger.info(f"Clipping VRT to AOI Extent")
         clip_raster_with_vector(
             raster_path=self.canopy_heights_preds_vrt_path, 
-            vector_path=self.config.paths.project.aoi, 
+            vector_path= aoi_path, 
             output_path=self.canopy_heights_preds_vrt_path
             )
 
+
+        ## Convert VRT To COG
+        # Define COG creation options
+        # COG driver automatically handles tiling and overviews
+        options = gdal.TranslateOptions(
+            format="COG",
+            creationOptions=[
+                "COMPRESS=LZW",      # Common lossless compression
+                "NUM_THREADS=ALL_CPUS",  # Speed up processing
+                "PREDICTOR=2",       # Improves compression for many datasets
+                "BIGTIFF=YES"        # Recommended for files > 4GB
+            ]
+        )
+
+        # Execute the translation
+        gdal.Translate(self.canopy_heights_preds_cog_path, self.canopy_heights_preds_vrt_path, options=options)
+        
+        self.next(self.upload_results_to_s3)
+
+    @step
+    def upload_results_to_s3(self):
+        from src.s3_utils import upload_files_to_s3
+        ## Upload files to S3 bucket
+        upload_files_to_s3(
+            bucket_name=self.s3_bucket,
+            file_paths=[self.canopy_heights_preds_cog_path],   
+        )
+        logger.info(f"Files uploaded to AWS S3 Bucket: {self.s3_bucket}")
+
+        
         self.next(self.end)
     @step
     def end(self):

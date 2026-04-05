@@ -23,18 +23,12 @@ def create_project_dirs(config):
     """
     dirs_to_create = [
         config.paths.project.root,
-        config.paths.raw.root,
         config.paths.raw.laz,
         config.paths.raw.embeddings,
-        config.paths.prc.root,
         config.paths.prc.chm,
         config.paths.prc.stratified,
-        config.paths.training.root,
-        config.paths.training.data,
-        config.paths.training.outputs,
         config.paths.training.ch_samples,
         config.paths.training.embedding_samples,
-        config.paths.models.root,
     ]
     
     for d in dirs_to_create:

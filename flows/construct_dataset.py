@@ -16,11 +16,13 @@ from src.data import get_aoi
 from hydra.utils import instantiate, call
 from spatialkfold.blocks import spatial_blocks
 import logging
+import uuid
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-@project(name = "data_flow")
+@project(name = "construct_canopy_height_dataset")
 class DataFlow(FlowSpec):
     '''
     Canopy Height Estimation with Google Earth Embeddings (GEE) Dataset Preparation Flow
@@ -33,7 +35,7 @@ class DataFlow(FlowSpec):
     7. Extract Tree Height Data using 10 x 10 grid cell with UTM CRS transform
     
     Example:
-    python flows/download_data.py run --max-workers 3 --max-num-splits 4000 --test true
+    python flows/construct_dataset.py run --max-workers 3 --max-num-splits 4000 --test true
     '''
     
     config_path = Parameter(
@@ -44,11 +46,21 @@ class DataFlow(FlowSpec):
     s3_bucket = Parameter(
         "s3-bucket",
         help = "S3 URI to root directory hosting lidar metadata (tiles and site boundaries)",
-        default = "s3://canopy-flow-data",
+        default = "canopy-flow-data",
+        required = False
+    )
+    tile_index_path = Parameter(
+        "tile-index-path",
+        default = "s3://canopy-flow-data/canelevation/tile_index.parquet",
+        required = False
+    )
+    sites_path = Parameter(
+        "sites-path",
+        default = "s3://canopy-flow-data/canelevation/sites.parquet",
         required = False
     )
     datasource_key = Parameter(
-        "datasource-ley",
+        "datasource-key",
         help = "Data source key path within s3 bucket. Directory should contain tile_index.parquet and sites.parquet",
         default = "canelevation",
         required = False
@@ -59,7 +71,7 @@ class DataFlow(FlowSpec):
         default = "projects",
         required = False
     )
-    cache_run_id = Parameter(
+    cache_experiment_id = Parameter(
         "cache-run-id",
         help = "Path to config YAML for configuring metaflow pipeline.",
         default = None,
@@ -71,12 +83,7 @@ class DataFlow(FlowSpec):
         default = False,
         required = False
     )
-    test_size = Parameter(
-        "test-size",
-        help = "Size of test sample size",
-        default = 10,
-        required = False
-    )
+   
    
     
     
@@ -85,13 +92,26 @@ class DataFlow(FlowSpec):
     @step
     def start(self):
         from src.data import create_project_dirs
-        print(self.config.paths.project.root)
+        
         ## Setup output Directory
-        project_id = str(self.cache_run_id) if self.cache_run_id is not None else str(current.run_id) 
- 
+        self.experiment_id = str(uuid.uuid4())
+
+        logger.info(f"Project Root Directory: {self.config.paths.project.root}")
+        logger.info(f"Experiment ID: {self.experiment_id}")
+
         # Create all project directories
         create_project_dirs(self.config)
+
+        self.experiment_dir = os.path.join(self.config.paths.project.root, 'experiments', self.experiment_id)
+        self.training_dataset_path = os.path.join(self.experiment_dir, self.config.paths.experiments.dataset)
+        self.embedding_samples_path =  os.path.join(self.experiment_dir, 'embeddings')
+        self.training_prc_dir = os.path.join(self.config.paths.project.root, 'data/training', self.experiment_id)
+
       
+        os.makedirs(self.experiment_dir, exist_ok=True)
+        os.makedirs(self.training_prc_dir, exist_ok=True)
+        os.makedirs(self.embedding_samples_path, exist_ok=True)
+
         self.next(self.get_aoi_and_tiles)
 
 
@@ -102,21 +122,23 @@ class DataFlow(FlowSpec):
         from src.geo_utils import preprocess_tiles
         from src.duckdb_utils import download_overture_water_bodies
         from glob import glob
+        from src.sampling import construct_stratified_sample
 
-        os.makedirs('data')
+        os.makedirs('data', exist_ok=True)
         paths = self.config.paths
-        if self.cache_run_id is not None:
+        if self.cache_experiment_id is not None:
             self.aoi_gdf = gpd.read_parquet(self.aoi_path)
             self.tiles_aoi_bounds_gdf = gpd.read_parquet(self.tiles_aoi_bounds_path)
-            self.tiles_aoi_gdf = gpd.read_parquet(self.tiles_aoi_path)
+            tiles_aoi_gdf = gpd.read_parquet(self.config.paths.project.tiles_aoi)
             ch_ids = [path.split('.')[0] for path in os.listdir(self.ch_dir)]
-            self.tile_ids = self.tiles_aoi_gdf[~self.tiles_aoi_gdf.Tile_name.isin(ch_ids)].tile_id.to_list()
+            self.tile_ids = tiles_aoi_gdf[~tiles_aoi_gdf.Tile_name.isin(ch_ids)].tile_id.to_list()
             if self.skip_lidar:
                 self.tile_ids = [self.tile_ids[0]]
             logger.info(f"Loading Data from Cache..")
         else:
 
-            sites_path = download_s3(self.config.datasources[self.config.project.datasource].sites, 'data')
+            sites_path = download_s3(self.sites_path, 'data')
+
             ## Read AOI GDF
             aoi_config = self.config.data.get_aoi
             aoi_gdf = get_aoi(
@@ -129,7 +151,7 @@ class DataFlow(FlowSpec):
             aoi_gdf.to_crs(self.utm_crs)
             
             ## Read Tile Index
-            tile_index_path = download_s3(self.config.datasources[self.config.project.datasource].tile_index, 'data')
+            tile_index_path = download_s3(self.tile_index_path, 'data')
             tile_index_gdf = gpd.read_parquet(tile_index_path).to_crs(self.utm_crs)
 
             ## Spatial Join Tile Index and AOI
@@ -140,7 +162,7 @@ class DataFlow(FlowSpec):
             ## Get Single geometry of tile boundaries
             tiles_aoi_geom = tiles_aoi_gdf.to_crs(self.utm_crs).buffer(2).reset_index().dissolve().buffer(-2).rename('geometry').reset_index()
             tiles_aoi_bounds_gdf = tiles_aoi_gdf.dissolve().set_geometry(tiles_aoi_geom.geometry.values)
-            tiles_aoi_gdf = tiles_aoi_gdf.sample(self.test_size) if self.test else tiles_aoi_gdf
+            
 
             ## Download Forest Mask
             bbox_4326 = aoi_gdf.to_crs(4326).total_bounds
@@ -166,27 +188,61 @@ class DataFlow(FlowSpec):
                 forest_raster_path= self.config.paths.project.forest_mask,
                 min_forest_cover = self.config.data.filter.min_forest_cover,
                 water_vector_path = self.config.paths.project.water_bodies
+            ).drop(columns = ['index_right'])
+
+
+            ## Run Get Spatial Blocks for Spatial Cross validation
+            blocks_gdf = spatial_blocks(
+                gdf = tiles_aoi_gdf, 
+                nfolds = self.config.data.sampling.k,
+                width = self.config.data.sampling.width, 
+                height = self.config.data.sampling.height, 
+                method = self.config.data.sampling.method, 
+                orientation = self.config.data.sampling.orientation, 
+                grid_type = self.config.data.sampling.grid_type,  
+                random_state = self.config.data.sampling.random_state
             )
+            blocks_gdf = blocks_gdf.set_crs(self.utm_crs, allow_override = True)
+            
+
+            
+            ## Pass SpatialFolds to tiles
+            tiles_aoi_gdf = gpd.overlay(blocks_gdf, tiles_aoi_gdf)
+            tiles_aoi_gdf['forest_cover_strata'] = pd.cut(tiles_aoi_gdf.forest_cover, [0.0, 0.3, 0.5, 0.8, 1.0], labels=['low', 'medium','high', 'full'])
+            
+
+            ## Stratified sampling of tiles based on forest cover and spatial k-fold ID
+            tiles_aoi_gdf, n_samples_per_tile = construct_stratified_sample(tiles_aoi_gdf,
+                                        strata_cols=['forest_cover_strata', 'folds'],
+                                        min_n = self.config.data.sampling.min_n_per_tile,
+                                        n_samples = self.config.data.sampling.n
+                                    )
+            
+            tiles_aoi_gdf = tiles_aoi_gdf.reset_index(drop=True).groupby('folds').apply(lambda group: group.sample(1)) if self.test else tiles_aoi_gdf
             logger.info(f"Tile Preprocessing: {org_length - len(tiles_aoi_gdf)} Tiles Filtered out")
+            logger.info(f"Samples per Tile {n_samples_per_tile}")
 
             ## Export geometries
             aoi_gdf.to_parquet(paths.project.aoi)
             tiles_aoi_bounds_gdf.to_parquet(paths.project.tiles_aoi_bounds)
             tiles_aoi_gdf.to_parquet(paths.project.tiles_aoi)
+            blocks_gdf.to_parquet(paths.project.blocks)
 
             ## Pass artifacts
             self.aoi_gdf = aoi_gdf
             self.tiles_aoi_bounds_gdf = tiles_aoi_bounds_gdf
-            self.tiles_aoi_gdf = tiles_aoi_gdf
+            # self.tiles_aoi_gdf = tiles_aoi_gdf
+            self.n_samples = n_samples_per_tile
+            self.blocks_gdf = blocks_gdf
 
             ## Filter out existing samples
             ch_files = glob(os.path.join(self.config.paths.training.ch_samples, "*.parquet"))
-            ch_exists = self.tiles_aoi_gdf.Tile_name.isin([os.path.basename(file).split('.')[0] for file in ch_files])
-            self.tile_ids = self.tiles_aoi_gdf[~ch_exists].tile_id.to_list()
+            ch_exists = tiles_aoi_gdf.Tile_name.isin([os.path.basename(file).split('.')[0] for file in ch_files])
+            self.tile_ids = tiles_aoi_gdf[~ch_exists].tile_id.to_list()
       
 
             if len(self.tile_ids) == 0:
-                self.tile_ids = [self.tiles_aoi_gdf.iloc[0].tile_id]
+                self.tile_ids = [tiles_aoi_gdf.iloc[0].tile_id]
 
         logger.info(f"Processing {len(self.tile_ids)} Point Cloud Tiles")
         self.next(self.get_lidar_data, foreach='tile_ids')
@@ -196,12 +252,12 @@ class DataFlow(FlowSpec):
     def get_lidar_data(self):
         from src.laz_utils import is_copc_vlr_present
         from src.chm import compute_chm
-        from src.geo_utils import stratify_raster, duckdb_get_intersection
+        from src.geo_utils import stratify_raster
         from src.sampling import generate_stratified_random_points, vectorize_strata, sample_raster_points
-        import uuid
-        from src.laz_utils import get_epsg_authority_from_laz
+        import numpy as np
         tile_id = self.input
-        tile_gdf = self.tiles_aoi_gdf[self.tiles_aoi_gdf.tile_id == tile_id]
+        tiles_aoi_gdf = gpd.read_parquet(self.config.paths.project.tiles_aoi)
+        tile_gdf = tiles_aoi_gdf[tiles_aoi_gdf.tile_id == tile_id]
 
         ## Setup Paths
         paths = self.config.paths
@@ -255,7 +311,7 @@ class DataFlow(FlowSpec):
             labels = dict(zip( list(range(len(self.config.data.sampling.height_strata))), self.config.data.sampling.strata_names ))
             bin_ids = list(range(1 , len(self.config.data.sampling.height_strata)+1))
             weights = dict(zip(bin_ids,bin_ids))
-
+            n_per_strata = [int(np.ceil(x / sum(weights) * self.n_samples)) for x in weights]   
 
             ## Vectorize CHM strata raster
             strata_gdf = vectorize_strata(
@@ -273,7 +329,7 @@ class DataFlow(FlowSpec):
                     point_samples_gdf = generate_stratified_random_points(
                         strata_gdf=strata_gdf,
                         strata_col="strata",
-                        n_per_strata=weights,
+                        n_per_strata=n_per_strata,
                         explode=True,
                         labels=labels,
                         out_vector_path = samples_path
@@ -287,6 +343,7 @@ class DataFlow(FlowSpec):
                         point_samples_gdf.to_parquet(samples_path)
                         self.samples_path = samples_path
 
+    
         self.next(self.join)
 
     @step
@@ -295,14 +352,16 @@ class DataFlow(FlowSpec):
         ## Merge Artifacts
         self.merge_artifacts(inputs, exclude= ["samples_path",
                                                 "get_lidar_data_failed",
-                                                "_catch_exception"])
+                                                "_catch_exception",
+                                            
+                                                ])
         
         paths = self.config.paths
         ## Merge Training Data GeoParquets into single GeoDataFrame and write to file
         self.training_data = merge_parquets_to_gdf(
             in_dir = paths.training.ch_samples, 
             crs = self.utm_crs,
-            out_path = paths.training.training_data
+            out_path = self.training_dataset_path
         )
   
         
@@ -311,26 +370,9 @@ class DataFlow(FlowSpec):
     
     @step
     def construct_spatial_kfold(self):
-        paths = self.config.paths
-
-          
-        ## Run Spatial K fold with Kmeans  
-        self.blocks_gdf = spatial_blocks(
-            gdf = self.training_data, 
-            nfolds = self.config.data.sampling.k,
-            width = self.config.data.sampling.width, 
-            height = self.config.data.sampling.height, 
-            method = self.config.data.sampling.method, 
-            orientation = self.config.data.sampling.orientation, 
-            grid_type = self.config.data.sampling.grid_type,  
-            random_state = self.config.data.sampling.random_state
-        )
-        self.blocks_gdf = self.blocks_gdf.set_crs(self.utm_crs, allow_override = True)
-        self.blocks_gdf.to_parquet(paths.training.blocks)
-
 
         self.training_data = gpd.overlay(self.training_data, self.blocks_gdf.to_crs(self.training_data.crs))
-        self.training_data.to_parquet(self.config.paths.training.training_data)
+        self.training_data.to_parquet(self.training_dataset_path)
     
         self.next(self.init_gee)
 
@@ -339,7 +381,7 @@ class DataFlow(FlowSpec):
         import ee
         from src.ee_utils import auth_gee_from_env
        
-     
+        tiles_aoi_gdf = gpd.read_parquet(self.config.paths.project.tiles_aoi)
         ## Authenticate GEE
         auth_gee_from_env()
     
@@ -349,7 +391,7 @@ class DataFlow(FlowSpec):
         bbox_coords = self.tiles_aoi_bounds_gdf.to_crs(4326).total_bounds
         bbox_ee =  ee.Geometry.Rectangle(*bbox_coords)
         ## Setup Year Variables
-        year1 = self.tiles_aoi_gdf.year.max().item()
+        year1 = tiles_aoi_gdf.year.max().item()
         year2 = f'{int(year1) + 1}-01-01'
         year1 = f'{year1}-01-01'
         logger.info(f"Configured Year Range: {year1} -> {year2}")
@@ -370,7 +412,7 @@ class DataFlow(FlowSpec):
         import pandas as pd
 
         paths = self.config.paths
-        embeddings_csv_path = os.path.join(paths.training.embedding_samples, f"embeddings_k{self.input}.csv")
+        embeddings_csv_path = os.path.join(self.embedding_samples_path, f"embeddings_k{self.input}.csv")
         embeddings_parquet_path = embeddings_csv_path.replace('.csv','.parquet')
 
         ## Authenticate GEE
@@ -378,28 +420,35 @@ class DataFlow(FlowSpec):
         
 
         k_point_samples = self.training_data[self.training_data.folds == self.input].to_crs(4326)
-        ## Upload point samples to GEE
-        logger.info("Uploading sample points to GEE")
-        point_samples_ee = gdf_points_to_ee(
-            gdf= k_point_samples,
-            id_col = self.config.data.sampling.id
-        )
 
-        ## Sample Emebdddings from points
-        logger.info(f"Sampling GEE Satellite Embeddings with {len(k_point_samples)} Points")
-        sampled_data =  self.embeddings_image.sampleRegions(
-            collection = point_samples_ee,
-            scale = self.config.data.res_m
-        )
+        if len(k_point_samples)> 0:
+            ## Upload point samples to GEE
+            logger.info("Uploading sample points to GEE")
+            point_samples_ee = gdf_points_to_ee(
+                gdf= k_point_samples,
+                id_col = self.config.data.sampling.id
+            )
 
-        logger.info(f"Exporting Sampled Embeddings")
+            ## Sample Emebdddings from points
+            logger.info(f"Sampling GEE Satellite Embeddings with {len(k_point_samples)} Points")
+            sampled_data =  self.embeddings_image.sampleRegions(
+                collection = point_samples_ee,
+                scale = self.config.data.res_m
+            )
 
-        ## Export Embeddings to CSV File
-        geemap.ee_to_csv(sampled_data, embeddings_csv_path)
+            logger.info(f"Exporting Sampled Embeddings")
 
-        embeddings_df = pd.read_csv(embeddings_csv_path)
-        embeddings_df.to_parquet(embeddings_parquet_path)
-        os.remove(embeddings_csv_path)
+            ## Export Embeddings to CSV File
+            geemap.ee_to_csv(sampled_data, embeddings_csv_path)
+
+            try:
+                embeddings_df = pd.read_csv(embeddings_csv_path)
+                embeddings_df.to_parquet(embeddings_parquet_path)
+                os.remove(embeddings_csv_path)
+            except:
+                logger.warning(f"Failed to read {embeddings_csv_path}")
+
+
         self.next(self.merge_training_data)
 
     @step
@@ -409,7 +458,7 @@ class DataFlow(FlowSpec):
         ## Read Emebeddings CSV File
         import duckdb
         con = duckdb.connect()
-        embeddings_df = con.sql(f"SELECT * FROM read_parquet('{self.config.paths.training.embedding_samples}/*.parquet')").to_df()
+        embeddings_df = con.sql(f"SELECT * FROM read_parquet('{self.embedding_samples_path}/*.parquet')").to_df()
         self.training_data = self.training_data.set_index('id').join(embeddings_df.set_index('id')).reset_index()
 
          ## Remove outliers
@@ -418,13 +467,38 @@ class DataFlow(FlowSpec):
             df = self.training_data,
             z_threshold=2.5
         )
-        logger.info(f"Outliers Removed: {n - len(self.training_data )}")
+        logger.info(f"Outliers Removed: {n - len(self.training_data)}")
 
         logger.info("Exporting Training Data")
-        self.training_data.to_parquet(self.config.paths.training.training_data)
+        self.training_data.to_parquet(self.training_dataset_path)
+    
+        self.next(self.upload_dataset_to_s3)
+
+    @step
+    def upload_dataset_to_s3(self):
+
+        from src.s3_utils import upload_files_to_s3
+        ## Write Latest ID to file
+        latest_path = os.path.join(self.config.paths.project.root, "latest.txt")
+        open(latest_path, 'w').write(self.experiment_id)
+
+        paths_cfg = self.config.paths.project
+        upload_files = [
+            paths_cfg.aoi,
+            paths_cfg.tiles_aoi,
+            paths_cfg.tiles_aoi_bounds,
+            paths_cfg.blocks,
+            self.training_dataset_path,
+            latest_path
+        ]
+
+        upload_files_to_s3(
+            bucket_name=self.s3_bucket,
+            file_paths=upload_files,   
+        )
+        logger.info(f"Files uploaded to AWS S3 Bucket: {self.s3_bucket}")
+
         self.next(self.end)
-
-
     @step
     def end(self):
         print("ENDING FLOW")
