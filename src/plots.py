@@ -133,7 +133,7 @@ def regression_scatter_plot(model_names, data_df, X_cols, y_col, folds, model_ma
         # ax[i].plot([lim[0], lim[1]], [lim[0], lim[1]], color='red')
         ax[i].set_aspect('equal', adjustable='box')
         ax[i].grid(True, linestyle=':', alpha=0.5)
-        ax[i].plot(lim, lim, color=diagonal_color, linestyle='--', linewidth=1)
+        ax[i].plot(lim, lim, color=diagonal_color, linestyle='--', linewidth=1.5)
 
         # Scatter plot
         # Set labels and title
@@ -149,7 +149,7 @@ def regression_scatter_plot(model_names, data_df, X_cols, y_col, folds, model_ma
 
         ## Add Line of Best Fit
         a, b = np.polyfit(vals, preds, 1)
-        ax[i].plot(vals, a*vals+b, color = 'green', linewidth = 0.8)
+        ax[i].plot(vals, a*vals+b, color = 'green', linewidth = 1.5)
 
         ## Add Text for results
         ax[i].text(

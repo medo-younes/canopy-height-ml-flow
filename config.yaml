@@ -1,7 +1,8 @@
 project:
   name: canopy-height-ml-flow
   datasource: canelevation
-  aoi_name: "Wood Buffalo National Park of Canada"
+  # aoi_name: "Wood Buffalo National Park of Canada"
+  aoi_name: "Jasper National Park of Canada"
   test: false
   seed: 420
   run_models: ['ElasticNet', 'RandomForestRegressor', 'XGBRegressor']
@@ -39,9 +40,10 @@ data:
 
 datasources:
   canelevation:
-    sites: data/canelevation/sites.parquet
-    tile_index: data/canelevation/tile_index.parquet
-    water_bodies: data/canelevation/water_bodies.parquet
+    s3_root: s3://canopy-flow-data/canelevation
+    sites: ${datasources.canelevation.s3_root}/sites.parquet
+    tile_index: ${datasources.canelevation.s3_root}/tile_index.parquet
+
 # File paths organization
 paths:
   project:

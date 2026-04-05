@@ -1,17 +1,32 @@
-import duckdb 
-import boto3
-
-
-
+import os
 import duckdb
+import boto3
 import requests
 import geopandas as gpd
 
+
+def load_duckdb_extension(con, extension, from_community=False):
+    try:
+        con.execute(f"LOAD {extension};")
+    except duckdb.IOException:
+        install_cmd = f"INSTALL {extension}"
+        if from_community:
+            install_cmd += " FROM community"
+        try:
+            con.execute(f"{install_cmd}; LOAD {extension};")
+        except duckdb.IOException as exc:
+            raise RuntimeError(
+                f"Failed to install/load DuckDB extension '{extension}'. "
+                "This likely means the Docker container has no internet access to download DuckDB extensions. "
+                "Pre-install the extension in the image or enable network access."
+            ) from exc
+
+
 def init_db():
     con = duckdb.connect()
-    con.execute("INSTALL httpfs; LOAD httpfs;")
-    con.execute("INSTALL spatial; LOAD spatial;")
-    con.execute("INSTALL pdal FROM community; LOAD pdal")
+    load_duckdb_extension(con, "httpfs")
+    load_duckdb_extension(con, "spatial")
+    load_duckdb_extension(con, "pdal", from_community=True)
     return con
 
 def configure_aws_credentials(con, region):
@@ -30,24 +45,34 @@ def configure_aws_credentials(con, region):
 
 def get_latest_overture_release() -> str:
     """Fetch the latest Overture Maps release tag from their STAC catalog."""
-    catalog = requests.get("https://stac.overturemaps.org/catalog.json").json()
-    return catalog["latest"]
+    env_release = os.environ.get("OVERTURE_MAPS_RELEASE")
+    if env_release:
+        return env_release
+
+    try:
+        response = requests.get("https://stac.overturemaps.org/catalog.json", timeout=10)
+        response.raise_for_status()
+        catalog = response.json()
+        return catalog["latest"]
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            "Unable to fetch latest Overture Maps release from stac.overturemaps.org. "
+            "If the container cannot access the internet, set OVERTURE_MAPS_RELEASE to a known release tag."
+        ) from exc
+
 
 def download_overture_water_bodies(
     bbox: list,
     out_path: str | None = None,
-    release: str | None = None,
+    release: str  = "2026-03-18.0",
 ) -> duckdb.DuckDBPyRelation:
     """
     Query Overture Maps water body polygons from S3 as a DuckDB relation.
     """
-    if release is None:
-        release = get_latest_overture_release()
-        print(f"Using Overture release: {release}")
-
+    
     con = duckdb.connect()
-    con.execute("INSTALL httpfs; LOAD httpfs;")
-    con.execute("INSTALL spatial; LOAD spatial;")
+    load_duckdb_extension(con, "httpfs")
+    load_duckdb_extension(con, "spatial")
     con.execute("SET s3_region = 'us-west-2';")
     con.execute("SET s3_use_ssl = true;")
 

@@ -36,8 +36,14 @@ conda activate canopy-flow
 ## Run with Docker
 
 ```bash
-docker pull <image-name>
-docker run ....
+# Export AWS Credentials to environment
+eval "$(aws configure export-credentials --profile default --format env)"
+
+# Run with docker image (myounes88/canopy-flow:test)
+docker run -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+           -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+           -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \
+            myounes88/canopy-flow:test python data.py run --max-workers 3 --max-num-splits 4000
 ```
 
 ## Running Flows

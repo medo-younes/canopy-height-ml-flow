@@ -41,6 +41,24 @@ class DataFlow(FlowSpec):
         help = "Path to config YAML for configuring metaflow pipeline.",
         default = "config.yaml"
     )
+    s3_bucket = Parameter(
+        "s3-bucket",
+        help = "S3 URI to root directory hosting lidar metadata (tiles and site boundaries)",
+        default = "s3://canopy-flow-data",
+        required = False
+    )
+    datasource_key = Parameter(
+        "datasource-ley",
+        help = "Data source key path within s3 bucket. Directory should contain tile_index.parquet and sites.parquet",
+        default = "canelevation",
+        required = False
+    )
+    output_dir = Parameter(
+        "output_dir",
+        help = "Name of ouput directory on S3 bucket",
+        default = "projects",
+        required = False
+    )
     cache_run_id = Parameter(
         "cache-run-id",
         help = "Path to config YAML for configuring metaflow pipeline.",
@@ -59,12 +77,7 @@ class DataFlow(FlowSpec):
         default = 10,
         required = False
     )
-    skip_lidar = Parameter(
-        "skip-lidar",
-        help = "Size of test sample size",
-        default = False,
-        required = False
-    )
+   
     
     
     config = Config("config", default = "config.yaml", parser = omega_parse)
@@ -90,6 +103,7 @@ class DataFlow(FlowSpec):
         from src.duckdb_utils import download_overture_water_bodies
         from glob import glob
 
+        os.makedirs('data')
         paths = self.config.paths
         if self.cache_run_id is not None:
             self.aoi_gdf = gpd.read_parquet(self.aoi_path)
@@ -101,10 +115,13 @@ class DataFlow(FlowSpec):
                 self.tile_ids = [self.tile_ids[0]]
             logger.info(f"Loading Data from Cache..")
         else:
+
+            sites_path = download_s3(self.config.datasources[self.config.project.datasource].sites, 'data')
             ## Read AOI GDF
             aoi_config = self.config.data.get_aoi
             aoi_gdf = get_aoi(
-                            sites_path=self.config.datasources[self.config.project.datasource].sites,
+                            # sites_path=self.config.datasources[self.config.project.datasource].sites,
+                            sites_path=sites_path,
                             name_col=aoi_config.name_col,
                             aoi_name=self.config.project.aoi_name
                             )
@@ -112,7 +129,8 @@ class DataFlow(FlowSpec):
             aoi_gdf.to_crs(self.utm_crs)
             
             ## Read Tile Index
-            tile_index_gdf = gpd.read_parquet(self.config.datasources[self.config.project.datasource].tile_index).to_crs(self.utm_crs)
+            tile_index_path = download_s3(self.config.datasources[self.config.project.datasource].tile_index, 'data')
+            tile_index_gdf = gpd.read_parquet(tile_index_path).to_crs(self.utm_crs)
 
             ## Spatial Join Tile Index and AOI
             tiles_aoi_gdf = gpd.sjoin(tile_index_gdf,aoi_gdf[['geometry']].to_crs(tile_index_gdf.crs), predicate='intersects', how='inner')

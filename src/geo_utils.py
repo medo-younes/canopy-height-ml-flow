@@ -3,7 +3,8 @@ from shapely.geometry import box
 import geopandas as gpd
 import numpy as np 
 import rasterio as rio
-
+import pyarrow.parquet as pq
+import json
 
 def meshgrid_from_coords(bbox, x_step, y_step):
         x1, y1, x2, y2 = bbox
@@ -134,8 +135,7 @@ def sample_percent_cover_from_mask(gdf, raster_path, band):
         return [src.read(band, window = window).mean() for window in windows]
     
 
-import pyarrow.parquet as pq
-import json
+
 def get_crs_epsg_from_parquet(file_path):
     # Read only the metadata (no data loaded into memory)
     metadata = pq.read_metadata(file_path)

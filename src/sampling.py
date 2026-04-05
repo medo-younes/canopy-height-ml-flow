@@ -47,4 +47,11 @@ def sample_raster_points(vector_path, raster_path):
         samples = src.sample(xy)
         return [float(sample.squeeze()) for sample in samples]
 
+
+
+def remove_height_outliers(df, z_threshold = 2.5):
+    mean = df.height.mean()
+    std = df.height.std()
+    z = (df.height - mean) / std
+    return df[(z > -z_threshold) & (z < z_threshold)]
     
