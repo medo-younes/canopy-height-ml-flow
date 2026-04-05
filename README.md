@@ -82,12 +82,17 @@ GEE_SERVICE_ACCOUNT_EMAIL=<YOUR-GEE-SERVICE-ACCOUNT-EMAIL>
 GEE_SERVICE_ACCOUNT_KEY_PATH=<PATH-TO-YOUR-GEE-SERVICE-ACCOUNT-KEY>
 ```
 
-## LiDAR Data
+## Using your Own LiDAR Data
 
-The current workflow is currently integrated with the CanElevation Series Dataset.
+The current workflow is currently integrated with the [CanElevation Series Dataset](https://open.canada.ca/data/en/dataset/7069387e-9986-4297-9f55-0288e9676947)
 
 To run this pipeline on your own data you will need:
 - **S3-hosted LiDAR Point Clouds** - your own [COPC](https://copc.io/) files hosted on AWS S3
 - **Tile Index** - indicating the spatial bounds of each point cloud, including its S3 URI or URL
 - **Google Earth Engine Account** with a valid service account key for programmatic access via Python API
-- AOI Polygon Boundary** AOI in GeoParquet format
+- **AOI Polygon Boundary** AOI in GeoParquet format
+
+
+## References
+
+This work is largely inspired by [Google Earths Medium Post](https://medium.com/google-earth/improved-forest-carbon-estimation-with-alphaearth-foundations-and-airborne-lidar-data-af2d93e94c55) written by John B. Kilbride
