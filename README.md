@@ -4,8 +4,11 @@
 
 End-to-end metaflow pipeline for estimating tree canopy height across large areas [Google AlphaEarth Satellite Embeddings](https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_SATELLITE_EMBEDDING_V1_ANNUAL) using airborne LiDAR Point Clouds as ground-truth.
 
+
+<img src="docs/predicted_chm.png"/>
+
 ### Three Flows for Generating Custom Canopy Height Maps
-1. [**Data Download**](flows/download_data.py) - downloading LiDAR point clouds from AWS S3 ([learn more](#lidar-data)), compute CHM, structurally guided sampling of tree canopy height. Sampling GEE satellite embeddings 
+1. [**Dataset Construction**](flows/download_data.py) - downloading LiDAR point clouds from AWS S3 ([learn more](#lidar-data)), compute CHM, structurally guided sampling of tree canopy height. Sampling GEE satellite embeddings 
 2. [**Training**](flows/train.py) - regression model training (Elastic Net, Random Forest and XGBoost) with Spatial K-fold Cross Validation. Automated model selection.
 3. [**Inference**](flows/inference.py) - predict tree canopy height across your AOI using best model checkpoint. 
 
