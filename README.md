@@ -8,7 +8,7 @@ End-to-end metaflow pipeline for estimating tree canopy height across large area
 <img src="docs/predicted_chm.png"/>
 
 ### Three Flows for Generating Custom Canopy Height Maps
-1. [**Dataset Construction**](flows/download_data.py) - downloading LiDAR point clouds from AWS S3 ([learn more](#lidar-data)), compute CHM, structurally guided sampling of tree canopy height. Sampling GEE satellite embeddings 
+1. [**Dataset Construction**](flows/construct_dataset.py) - downloading LiDAR point clouds from AWS S3, compute CHM, structurally guided sampling of tree canopy height. Sampling GEE satellite embeddings 
 2. [**Training**](flows/train.py) - regression model training (Elastic Net, Random Forest and XGBoost) with Spatial K-fold Cross Validation. Automated model selection.
 3. [**Inference**](flows/inference.py) - predict tree canopy height across your AOI using best model checkpoint. 
 
