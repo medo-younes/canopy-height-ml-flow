@@ -25,7 +25,7 @@ The first step is to retrieve the tiles overlapping the area of interest (AOI) u
 Before sampling canopy heights, the tile index is allocated to a spatial block for spatial cross-validation (spatial CV) and then subsampled to avoid downloading thousands of COPCs. A 5-fold 10 x 10 km spatial block grid was constructed using the [spatial-kfold library](https://github.com/WalidGharianiEAGLE/spatial-kfold), intersecting tiles then inherit the fold ID. The tile index is then subsampled, 20 tiles are sampled from each fold ID and forest cover stratum (5-meter bins), resulting in subset of tiles representative of the spatial extent and forest cover across the site. By employing spatial CV, models are evaluated on their ability to learn meaningful patterns across space, ensuring robustness against spatial autocorrelation and can generalize across unseen regions (Ploton et al., 2020).
 
 <br clear="left"/>
-<img src="chm_sampling.png" align = "left" width ="200px" padding ="50px"/>
+<img src="chm_sampling.png" align = "left" width ="300px" padding ="50px"/>
 Now the point clouds are ready for sampling. Using metaflow's parallelization capabilities, LiDAR point clouds are downloaded, preprocessed, and sampled in parallel, optimizing workflow speed.
 
 The canopy height sampling methodology follows a Structurally Guided Sampling (SGS) approach, where structural stratification—in this case canopy height—informs where samples are taken across the site (Goodbody et al., 2023). First, a Canopy Height Model (CHM) is computed from the raw point clouds by attaining the 95th percentile in Height Above Ground (HAG) at 10-meter resolution. The CHM is stratified into 5-meter bins, deriving the regions from which random point samples are generated.
@@ -33,7 +33,7 @@ The canopy height sampling methodology follows a Structurally Guided Sampling (S
 Furthermore, a weighted sampling approach is applied, whereby areas with taller canopy heights are sampled more frequently than low or average canopy heights. Since tall canopies occur less frequently, weighted sampling ensures they are appropriately represented in the dataset, allowing the model to estimate tall canopy heights with greater accuracy.
 
 <br clear="left"/>
-<img src="embeddings.png" align = "left" width ="200px" padding ="50px"/>
+<img src="embeddings.png" align = "left" width ="300px" padding ="50px"/>
 
 Once canopy heights have been sampled, the next step is to extract Satellite Embeddings from GEE. The GEE Python API is used to retrieve the GEE Satellite Embeddings image corresponding to the LiDAR data's acquisition year, in this case, 2019. The sample point geometries are uploaded to GEE to extract 64 embedding values for it's corresponding pixel. The embeddings are then downloaded and merged with the canopy height data. Point samples inherit the fold ID from the spatial blocks generated earlier to construct the final training dataset.
 
