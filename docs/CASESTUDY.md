@@ -20,32 +20,31 @@ The first step is to retrieve the tiles overlapping the area of interest (AOI) u
 
 <br clear="left"/>
 <img src="sample_points.png" align = "left" width ="500px" padding ="50px"/>
+<img src="chm_sampling.png" align = "right" width ="200px" padding ="50px"/>
+
+Before sampling canopy heights, the tile index is allocated to a spatial block for spatial cross-validation (spatial CV) and then subsampled to avoid downloading thousands of COPCs. A 5-fold 10 x 10 km spatial block grid was constructed using the [spatial-kfold library](https://github.com/WalidGharianiEAGLE/spatial-kfold), intersecting tiles then inherit the fold ID. The tile index is then subsampled, 20 tiles are sampled from each fold ID and forest cover stratum (5-meter bins), resulting in subset of tiles representive of the spatial extent and forest cover across the site. By employing spatial CV, models are evaluated on their ability to learn meaningful patterns across space, ensuring robustness against spatial autocorrelation and can generalize across unseen regions.
+
+Now the point clouds are ready for sampling. Using metaflow's parralelization capabilities, LiDAR point clouds are downloaded, preprocessed and samples in parralel, optimizing speed in the workflow. The canopy height sampling methodology follows a Structurally Guided Sampling (SGS) approach, where structural stratification, in this case canopy height, informs where samples are taken across the site (Goodbody et al., 2023).
+
 
 <br clear="left"/>
 
-
 ## Multi-Model Opimization
 
-<div style="display: flex; align-items: center; gap: 20px;">
-  <div style="flex: ;">
-      — using airborne LiDAR from Natural Resources Canada.  Elastic Net came out on top: R² = 0.841 ± 0.035 | RMSE = 3.851 ± 0.44m. In another post, I'll share more about the tools I used to develop this pipeline.
-  
 
-  </div>
-  <div style="flex: 1;">
-    <img src="regression_plot.png"/>
-    <img src="boxplot_comparison.png"/>
-
-  </div>
-</div>
+<img src="regression_plot.png"/>
+<img src="boxplot_comparison.png"/>
 
 
 
-
+<img src="predicted_chm_aoi.png"/>
 
 ![Alt text description](predicted_chm.png)
 
 ## References
+
+
+Goodbody, T. R. H., Coops, N. C., Queinnec, M., White, J. C., Tompalski, P., Hudak, A. T., Auty, D., Valbuena, R., LeBoeuf, A., Sinclair, I., McCartney, G., Prieur, J.-F., & Woods, M. E. (2023). sgsR: A structurally guided sampling toolbox for LiDAR-based forest inventories. Forestry, 96(4), 411–424. https://doi.org/10.1093/forestry/cpac055
 
 1. Xiao, Y. (2024). Global Natural and Planted Forests Mapping at Fine Spatial Resolution of 30 m [Data set].
 Zenodo. https://doi.org/10.5281/zenodo.10701417
