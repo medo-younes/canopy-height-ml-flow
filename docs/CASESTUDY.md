@@ -33,7 +33,7 @@ The canopy height sampling methodology follows a Structurally Guided Sampling (S
 Furthermore, a weighted sampling approach is applied, whereby areas with taller canopy heights are sampled more frequently than low or average canopy heights. Since tall canopies occur less frequently, weighted sampling ensures they are appropriately represented in the dataset, allowing the model to estimate tall canopy heights with greater accuracy.
 
 <br clear="left"/>
-<img src="chm_sampling.png" align = "left" width ="200px" padding ="50px"/>
+<img src="embeddings.png" align = "left" width ="200px" padding ="50px"/>
 
 Once canopy heights have been sampled, the next step is to extract Satellite Embeddings from GEE. The GEE Python API is used to retrieve the GEE Satellite Embeddings image corresponding to the LiDAR data's acquisition year, in this case, 2019. The sample point geometries are uploaded to GEE to extract 64 embedding values for it's corresponding pixel. The embeddings are then downloaded and merged with the canopy height data. Point samples inherit the fold ID from the spatial blocks generated earlier to construct the final training dataset.
 
