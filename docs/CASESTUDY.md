@@ -40,9 +40,7 @@ Once canopy heights have been sampled, the next step is to extract Satellite Emb
 
 ## Multi-Model Optimization
 
-Three powerful regression models were evaluated on outputted dataset; Elastic Net, Random Forest and XGBoost. Elastic Net is an extension of the classic linear regression model, including regularization mechanisms to reduce overfitting. Random forest is a popular ML algorithm, an ensemble of decision trees that learn meaningful decision boundaries from the data, the final prediction is a combination of the output from all decision trees in the random forest. XGBoost is a gradient boosting algorithm (add more). 
-
-Each model is trained and tested on all five folds using the [OptunaSearchCV](https://optuna.readthedocs.io/en/v2.0.0/reference/generated/optuna.integration.OptunaSearchCV.html) method. Using the mean Root Mean Squared Error (RMSE) across all folds as the objective function, a Bayesian hyperparameter search with 30 trials is implemented to obtain the best model parameters for the training dataset.
+Three powerful regression models were evaluated on outputted dataset; Elastic Net, Random Forest and XGBoost. Each model is trained and tested on all five folds using the [OptunaSearchCV](https://optuna.readthedocs.io/en/v2.0.0/reference/generated/optuna.integration.OptunaSearchCV.html) method. Using the mean Root Mean Squared Error (RMSE) across all folds as the objective function, a Bayesian hyperparameter search with 30 trials is implemented to obtain the best model parameters for the training dataset. The metaflow pipeline implementing the training loop [can be found here](../flows/train.py).
 
 Despite models attaining similarly high R2 scores of >0.80, Elastic Net achieved the highest performance; R² = 0.841 ± 0.035 | RMSE = 3.851 ± 0.44m. Low error variability suggests that the model performed well across all folds, indicated strong spatial generalization capability. 
 
@@ -51,6 +49,7 @@ Despite models attaining similarly high R2 scores of >0.80, Elastic Net achieved
 
 ## Predicting Canopy Height
 
+The canopy height map below is the output of the pretrained Elastic Net model.
 <img src="predicted_chm_aoi.png"/>
 
 ![Alt text description](predicted_chm.png)
