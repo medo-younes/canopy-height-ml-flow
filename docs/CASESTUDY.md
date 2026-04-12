@@ -15,12 +15,12 @@ With the end goal of constructing a training dataset including sampled forest ca
 
 Airborne LiDAR Point Clouds were utilized as ground-truth canopy height data for the study area. The [CanElevation Series](https://open.canada.ca/data/en/dataset/7069387e-9986-4297-9f55-0288e9676947) is a publicly available LiDAR Point Cloud dataset produced by Natural Resources Canada (NRCan). There is wide coverage across major Canadian cities and natural sites, making it an extremely valuable elevation dataset for the country. Made available as Cloud Optimized Point Clouds (COPC) on AWS S3, CanElevation Series enables fast spatial querying of point cloud data. It comes with a 1 x 1 km tile index, including the spatial boundaries of each COPC file, project metadata (including acquisition year) and its S3 URL. 
 
-<img src="sample_points.png" align = "right" width ="300px" padding ="50px"/>
+<img src="copc.png" align = "right" width ="300px" padding ="50px"/>
 The first step is to retrieve the tiles overlapping the area of interest (AOI) using as simple spatial join. The intersection amounted to 3,536 tiles. Next, the intersecting tiles were filtered based on forest cover (>=25%) using a [global raster of natural and planted forest extent on GEE](https://gee-community-catalog.org/projects/global_ftype/) (Xiao, Y., 2024). Water bodies (oceans and lakes) were clipped out from tile geometries with the help of [Overture's globally available water features dataset](https://docs.overturemaps.org/schema/reference/base/water/). As a result, the post processed tiles ensure that only forested areas are sampled, while avoiding the sampling of water. Following these preprocessing steps, a total of 2,240 tiles covering 1,813 km2 remained; only ~4% of the study area.
 
 <br clear="left"/>
 
-<img src="copc.png" align = "right" width ="300px" padding ="50px"/>
+<img src="sample_points.png" align = "right" width ="300px" padding ="50px"/>
 Before sampling canopy heights, the tile index is allocated to a spatial block for spatial cross-validation (spatial CV) and then subsampled to avoid downloading thousands of COPCs. A 5-fold 10 x 10 km spatial block grid was constructed using the [spatial-kfold library](https://github.com/WalidGharianiEAGLE/spatial-kfold), intersecting tiles then inherit the fold ID. The tile index is then subsampled, 20 tiles are sampled from each fold ID and forest cover stratum (5-meter bins), resulting in subset of tiles representative of the spatial extent and forest cover across the site. By employing spatial CV, models are evaluated on their ability to learn meaningful patterns across space, ensuring robustness against spatial autocorrelation and can generalize across unseen regions (Ploton et al., 2020).
 
 <br clear="left"/>
