@@ -379,7 +379,7 @@ class DataFlow(FlowSpec):
     @step
     def init_gee(self):
         import ee
-        from src.ee_utils import auth_gee_from_env
+        from src.ee_utils import auth_gee_from_env, get_embeddings_image
        
         tiles_aoi_gdf = gpd.read_parquet(self.config.paths.project.tiles_aoi)
         ## Authenticate GEE
@@ -389,18 +389,11 @@ class DataFlow(FlowSpec):
         embeddings_col = ee.ImageCollection("GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL")
         ## Configure Query Geometry
         bbox_coords = self.tiles_aoi_bounds_gdf.to_crs(4326).total_bounds
-        bbox_ee =  ee.Geometry.Rectangle(*bbox_coords)
         ## Setup Year Variables
         year1 = tiles_aoi_gdf.year.max().item()
-        year2 = f'{int(year1) + 1}-01-01'
-        year1 = f'{year1}-01-01'
-        logger.info(f"Configured Year Range: {year1} -> {year2}")
-        
-        ## Get Emebeddings image from Target Year
-        embeddings_image = embeddings_col.filterDate(year1, year2).filterBounds(bbox_ee).first()
-
+ 
         ## Pass Embeddings Images to Metaflow object
-        self.embeddings_image = embeddings_image
+        self.embeddings_image = get_embeddings_image(bbox_coords, year1)
         self.folds = self.blocks_gdf.folds.unique()
         
         self.next(self.extract_gee_embeddings, foreach = "folds")
@@ -459,7 +452,10 @@ class DataFlow(FlowSpec):
         import duckdb
         con = duckdb.connect()
         embeddings_df = con.sql(f"SELECT * FROM read_parquet('{self.embedding_samples_path}/*.parquet')").to_df()
-        self.training_data = self.training_data.set_index('id').join(embeddings_df.set_index('id')).reset_index()
+        self.training_data = self.training_data.set_index('id').join(
+                                                                    embeddings_df.set_index('id'),
+                                                                    rsuffix='_embeddings'  # Rename duplicates with suffix
+                                                                ).reset_index()
 
          ## Remove outliers
         n = len(self.training_data )

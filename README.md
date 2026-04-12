@@ -4,6 +4,8 @@
 
 End-to-end metaflow pipeline for estimating tree canopy height across large areas [Google AlphaEarth Satellite Embeddings](https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_SATELLITE_EMBEDDING_V1_ANNUAL) using airborne LiDAR Point Clouds as ground-truth.
 
+Read the Case Study [HERE](docs/CASESTUDY.md).
+
 
 <img src="docs/diagram.png"/>
 

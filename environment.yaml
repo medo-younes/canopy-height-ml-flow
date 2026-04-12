@@ -30,3 +30,4 @@ dependencies:
       - geedim
       - optuna-integration[sklearn]
       - seaborn
+      - mss

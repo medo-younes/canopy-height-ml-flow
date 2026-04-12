@@ -1,8 +1,8 @@
 project:
   name: canopy-height-ml-flow
   datasource: canelevation
-  # aoi_name: "Wood Buffalo National Park of Canada"
-  aoi_name: "Jasper National Park of Canada"
+  aoi_name: "Wood Buffalo National Park of Canada"
+  # aoi_name: "Jasper National Park of Canada"
   s3_bucket: canopy-flow-data
   s3_prefix: ${project.s3_bucket}/${project.aoi_name}
   seed: 420
